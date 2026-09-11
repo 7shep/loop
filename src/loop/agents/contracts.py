@@ -61,7 +61,7 @@ _ROLE_DEFINITIONS: dict[str, AgentRole] = {
         "Interpret assignment requirements and create the global section/dependency plan.",
         "assignment-manifest + assignment files",
         "global-plan",
-        ("assignment.md", "outline-index.json", "outline/**", "source-index.json"),
+        ("assignment.md", "outline-index.json", "outline/**", "sources/links.md", "sources/**", "source-index.json"),
         ("global-plan.json", "task-graph.json", "state.json"),
     ),
     "planner": AgentRole(
@@ -69,7 +69,7 @@ _ROLE_DEFINITIONS: dict[str, AgentRole] = {
         "Create one section's objective, claims, evidence requirements, structure, and word target.",
         "assignment + global plan + section context",
         "section-plan",
-        ("assignment.md", "outline-index.json", "outline/**", "global-plan.json", "section artifacts"),
+        ("assignment.md", "outline-index.json", "outline/**", "sources/links.md", "sources/**", "global-plan.json", "section artifacts"),
         ("section plan.json",),
     ),
     "researcher": AgentRole(
@@ -77,7 +77,7 @@ _ROLE_DEFINITIONS: dict[str, AgentRole] = {
         "Gather traceable evidence for approved claims from permitted sources.",
         "approved section plan + source registry",
         "research + evidence records",
-        ("sources/**", "source-index.json", "outline-index.json", "outline/**", "section plan.json"),
+        ("sources/links.md", "sources/**", "source-index.json", "outline-index.json", "outline/**", "section plan.json"),
         ("research.json", "evidence.json"),
     ),
     "writer": AgentRole(
@@ -85,7 +85,7 @@ _ROLE_DEFINITIONS: dict[str, AgentRole] = {
         "Draft a section using only its approved plan and registered evidence.",
         "approved plan + relevant evidence + style rules",
         "section draft",
-        ("assignment.md", "outline-index.json", "outline/**", "section plan.json", "research.json", "evidence.json"),
+        ("assignment.md", "outline-index.json", "outline/**", "sources/links.md", "sources/**", "section plan.json", "research.json", "evidence.json"),
         ("section draft.md",),
     ),
     "reviewer": AgentRole(
@@ -93,7 +93,7 @@ _ROLE_DEFINITIONS: dict[str, AgentRole] = {
         "Critique a section plan or draft and return structured feedback without mutating accepted output.",
         "review target + requirements + evidence",
         "plan-review or writing-review",
-        ("assignment.md", "outline-index.json", "outline/**", "global-plan.json", "section artifacts", "evidence.json"),
+        ("assignment.md", "outline-index.json", "outline/**", "sources/links.md", "sources/**", "global-plan.json", "section artifacts", "evidence.json"),
         ("plan-review.json", "writing-review.json"),
     ),
     "global_reviewer": AgentRole(
@@ -101,7 +101,7 @@ _ROLE_DEFINITIONS: dict[str, AgentRole] = {
         "Audit the assembled document for assignment-wide quality and route affected sections.",
         "assembled draft + requirements + source registry",
         "global-review",
-        ("output/final-draft.*", "assignment.md", "outline-index.json", "outline/**", "global-plan.json", "source-index.json"),
+        ("output/final-draft.*", "assignment.md", "outline-index.json", "outline/**", "sources/links.md", "sources/**", "global-plan.json", "source-index.json"),
         ("reviews/global-review.json",),
     ),
 }

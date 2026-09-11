@@ -46,7 +46,9 @@ class LoopConfig:
     output: str = "markdown"
     citation_style: str = "APA"
     runtime: str = "conversation"
-    external_research: bool = False
+    # Sources are supplied as URLs in sources/links.md, so native researchers
+    # need web access by default to inspect and verify the relevant links.
+    external_research: bool = True
     models: dict[str, AgentConfig] = field(default_factory=dict)
     limits: Limits = field(default_factory=Limits)
 
@@ -101,7 +103,7 @@ class LoopConfig:
             output=str(raw.get("output", "markdown")),
             citation_style=str(raw.get("citation_style", "APA")),
             runtime=str(raw.get("runtime", "conversation")),
-            external_research=bool(raw.get("external_research", False)),
+            external_research=bool(raw.get("external_research", True)),
             models=models,
             limits=limits,
         )
@@ -162,7 +164,7 @@ def load_config(root: Path, explicit_path: Path | None = None) -> LoopConfig:
         output=str(raw.get("output", "markdown")).lower(),
         citation_style=str(raw.get("citation_style", "APA")),
         runtime=str(raw.get("runtime", "conversation")).lower(),
-        external_research=bool(raw.get("external_research", False)),
+        external_research=bool(raw.get("external_research", True)),
         models=_merge_model_config(models_raw),
         limits=limits,
     )

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Loop web source index",
+  "type": "object",
+  "required": ["links_file", "feedback_files", "sources"],
+  "properties": {
+    "links_file": {"const": "sources/links.md"},
+    "feedback_files": {"type": "array", "items": {"type": "string"}},
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "authors", "year", "type", "path", "url", "verified"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^S[0-9]+$"},
+          "title": {"type": "string"},
+          "authors": {"type": "array", "items": {"type": "string"}},
+          "year": {"type": ["integer", "null"]},
+          "type": {"const": "web"},
+          "path": {"const": "sources/links.md"},
+          "url": {"type": "string", "format": "uri"},
+          "verified": {"type": "boolean"}
+        }
+      }
+    }
+  }
+}

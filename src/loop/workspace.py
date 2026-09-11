@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 
 class WorkspaceError(RuntimeError):
@@ -14,6 +15,12 @@ class WorkspaceError(RuntimeError):
 
 @dataclass(frozen=True)
 class Workspace:
+    # Markdown is included because it is a plain-text feedback format; the
+    # required links.md is excluded by path and remains the only source list.
+    SOURCE_FEEDBACK_EXTENSIONS = frozenset({".docx", ".md", ".pdf", ".text", ".txt"})
+    _MARKDOWN_LINK_RE = re.compile(r"\[[^\]]*\]\((https?://[^\s)]+)\)", re.IGNORECASE)
+    _URL_RE = re.compile(r"https?://[^\s<>\[\]()]+", re.IGNORECASE)
+
     root: Path
     loop_dir: Path
     output_dir: Path
@@ -147,10 +154,34 @@ class Workspace:
         rubric_files = outline_index["rubric_files"]
 
         source_root = self.inside("sources")
-        source_files: list[str] = []
-        if source_root.is_dir():
-            for file_path in sorted(path for path in source_root.rglob("*") if path.is_file()):
-                source_files.append(self.relative(file_path))
+        links_path = self.inside("sources/links.md")
+        if not links_path.is_file():
+            raise WorkspaceError("sources/links.md is required in the active assignment directory")
+
+        source_artifacts = sorted(
+            (path for path in source_root.rglob("*") if path.is_file()),
+            key=lambda item: self.relative(item),
+        )
+        unsupported = [
+            self.relative(path)
+            for path in source_artifacts
+            if path.resolve() != links_path.resolve()
+            and path.suffix.lower() not in self.SOURCE_FEEDBACK_EXTENSIONS
+        ]
+        if unsupported:
+            supported = ", ".join(sorted(self.SOURCE_FEEDBACK_EXTENSIONS))
+            raise WorkspaceError(
+                "unsupported file(s) in sources/: "
+                f"{', '.join(unsupported)}; optional source feedback must use {supported}"
+            )
+
+        source_feedback_files = [
+            self.relative(path)
+            for path in source_artifacts
+            if path.resolve() != links_path.resolve()
+        ]
+        source_files = [self.relative(links_path)]
+        source_artifact_refs = [self.relative(path) for path in source_artifacts]
 
         return {
             "workspace_root": str(self.root),
@@ -163,31 +194,77 @@ class Workspace:
             "outline_files": outline_index["outline_files"],
             "assignment_outline_files": assignment_outline_files,
             "rubric_files": rubric_files,
-            "past_marks_files": outline_index["past_marks_files"],
+            # Historical grades/feedback belong in sources/ alongside the
+            # canonical links file. Keep outline history visible for older
+            # assignment layouts, but expose the source-folder files
+            # separately so they cannot be mistaken for citation sources.
+            "past_marks_files": [
+                *outline_index["past_marks_files"],
+                *source_feedback_files,
+            ],
             "other_guidance_files": outline_index["other_guidance_files"],
             "legacy_outline_files": outline_index["legacy_files"],
             "source_files": source_files,
+            "source_dir": "sources",
+            "links_file": self.relative(links_path),
+            "source_feedback_files": source_feedback_files,
+            "source_artifacts": source_artifact_refs,
         }
 
     def source_index(self) -> list[dict[str, Any]]:
         manifest = self.input_manifest()
+        links_file = manifest["links_file"]
+        links_text = self.read_input(links_file)
+        links = self._extract_urls(links_text)
+        if not links:
+            raise WorkspaceError("sources/links.md must contain at least one HTTP(S) source link")
+
         result: list[dict[str, Any]] = []
-        for index, relative in enumerate(manifest["source_files"], start=1):
-            path = self.inside(relative)
-            title = re.sub(r"[-_]+", " ", path.stem).strip().title()
+        for index, link in enumerate(links, start=1):
+            title = self._link_title(links_text, link)
             result.append(
                 {
                     "id": f"S{index:02d}",
-                    "title": title or path.name,
+                    "title": title,
                     "authors": [],
                     "year": None,
-                    "type": path.suffix.lower().lstrip(".") or "file",
-                    "path": relative,
-                    "url": None,
+                    "type": "web",
+                    "path": links_file,
+                    "url": link,
                     "verified": True,
                 }
             )
         return result
+
+    @classmethod
+    def _extract_urls(cls, text: str) -> list[str]:
+        """Extract unique HTTP(S) URLs while preserving links.md order."""
+
+        urls: list[str] = []
+        seen: set[str] = set()
+        for match in cls._URL_RE.finditer(text):
+            url = match.group(0).rstrip(".,;:!?\"'")
+            parsed = urlparse(url)
+            if not parsed.netloc:
+                continue
+            if url not in seen:
+                seen.add(url)
+                urls.append(url)
+        return urls
+
+    @classmethod
+    def _link_title(cls, text: str, url: str) -> str:
+        for match in cls._MARKDOWN_LINK_RE.finditer(text):
+            candidate = match.group(1).rstrip(".,;:!?\"'")
+            if candidate == url:
+                label = re.sub(r"\s+", " ", match.group(0).split("](", 1)[0][1:]).strip()
+                if label:
+                    return label
+        parsed = urlparse(url)
+        hostname = parsed.netloc.removeprefix("www.")
+        path_name = parsed.path.rstrip("/").rsplit("/", 1)[-1]
+        fallback = path_name or hostname or url
+        return re.sub(r"[-_]+", " ", fallback).strip().title()
 
     def read_input(self, relative: str | Path) -> str:
         path = self.inside(relative)

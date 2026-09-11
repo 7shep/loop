@@ -14,23 +14,38 @@ unless the user explicitly names a path.
 
 ## Assignment guidance inputs
 
-`assignment.md` is required. Optional assignment guidance belongs in an
-`outline/` directory; it is a collection, not a single required filename. Every
-file below that directory is indexed and passed to the relevant agents, including
-PDFs, Markdown, text, and nested files. Names such as these are recommended but
-not required:
+`assignment.md` and `sources/links.md` are required. Assignment guidance belongs
+in an optional `outline/` directory; it is a collection, not a single required
+filename. Every file below that directory is indexed and passed to the relevant
+agents, including PDFs, Markdown, text, and nested files. The sources directory
+has a fixed entry point and an optional historical-feedback collection:
+
+```text
+sources/
+├── links.md                   # required HTTP(S) source links
+├── past-grade.pdf             # optional
+├── professor-feedback.docx    # optional
+└── previous-comments.txt      # optional
+```
+
+Optional source feedback files must be PDF, DOCX, or text files. They are
+historical guidance and are never citation sources. Each HTTP(S) link in
+`sources/links.md` becomes a registered web source (`S01`, `S02`, ...):
 
 ```text
 outline/
-├── assignment-outline.pdf   # or .md/.txt
-├── rubric.pdf               # optional
-├── past-marks.pdf           # optional
-└── professor-feedback.md    # optional
+├── assignment-outline.pdf     # or .md/.txt
+├── rubric.pdf                 # optional
+├── past-marks.pdf             # optional legacy location
+└── professor-feedback.md      # optional legacy location
 ```
 
 Loop classifies likely rubric and past-mark/feedback files in
 `.loop/outline-index.json`, while still passing every `outline/` artifact to the
-agents so an unusual filename is not silently ignored. Root-level
+agents so an unusual filename is not silently ignored. It passes `links.md` and
+the optional source-feedback files to every relevant task, and gives the
+researcher web-search instructions for opening and evaluating the listed links.
+Root-level
 `outline.md`/`rubric.*` inputs remain a compatibility path for older assignment
 folders.
 
@@ -39,7 +54,8 @@ writing, and review task must read them and extract supported recurring reasons
 marks were lost. Convert those reasons into concrete do/not-do checks and apply
 them alongside the current assignment outline and rubric. Historical feedback is
 guidance, not a replacement for current requirements: never invent prior issues,
-copy old assignment content, or let an old rubric override the current one.
+copy old assignment content, cite feedback files, or let an old rubric override
+the current one.
 
 ## Native subagent execution
 
@@ -52,8 +68,9 @@ user to switch threads.
    `loop run . --runtime conversation --request "<request>"`. The command
    initializes `.loop/` and emits the next structured task manifest.
 2. Read the pending manifest under `.loop/tasks/`. It names the role, model and
-   reasoning effort, artifact inputs (including `.loop/outline-index.json` and
-   relevant `outline/` files), output path, and role contract.
+   reasoning effort, artifact inputs (including `.loop/outline-index.json`,
+   `outline/` files, `sources/links.md`, and optional source feedback files),
+   output path, and role contract.
 3. Spawn a native subagent for that task using the matching custom agent from
    `agents/` (`loop_planner`, `loop_researcher`, `loop_writer`,
    `loop_reviewer`, or `loop_global_reviewer`) when those definitions have been

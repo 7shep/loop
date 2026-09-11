@@ -14,16 +14,18 @@ Desktop/
             └── loop runs here
 ```
 
-The user provides an assignment prompt, outline, rubric, constraints, source files, and output requirements from that folder. Loop decomposes the work, runs section-level agent workflows, validates intermediate outputs, assembles the final artifact, and performs a whole-document review before completion.
+The user provides an assignment prompt, outline, rubric, source links, historical grade feedback, constraints, and output requirements from that folder. Loop decomposes the work, runs section-level agent workflows, validates intermediate outputs, assembles the final artifact, and performs a whole-document review before completion.
 
 Assignment guidance is grouped under an optional `outline/` directory. The
-directory may contain an assignment outline, one or more rubrics, and optional
-past marks or professor feedback. File names are not part of the contract, and
-PDFs are valid guidance inputs. Loop indexes every file there and classifies
-likely rubric and history files for agent routing. When historical feedback is
-available, planning, writing, and review agents extract supported reasons marks
-were lost and turn them into concrete do/not-do checks; current assignment
-requirements remain authoritative.
+directory may contain an assignment outline and one or more rubrics. Historical
+grades or professor feedback belong in `sources/` alongside the required
+`links.md`; those optional files may be PDF, DOCX, or text. File names under
+`outline/` are not part of the contract, and PDFs are valid guidance inputs.
+Loop indexes every outline file and classifies likely rubric and legacy history
+files for agent routing. When historical feedback is available, planning,
+writing, and review agents extract supported reasons marks were lost and turn
+them into concrete do/not-do checks; current assignment requirements remain
+authoritative.
 
 The intended interaction is simple:
 
@@ -76,11 +78,10 @@ Desktop/
     │   │   ├── assignment.md
     │   │   ├── outline/
     │   │   │   ├── assignment-outline.pdf
-    │   │   │   ├── rubric.pdf
-    │   │   │   └── past-marks.md
+    │   │   │   └── rubric.pdf
     │   │   ├── sources/
-    │   │   │   ├── source-01.pdf
-    │   │   │   └── source-02.pdf
+    │   │   │   ├── links.md
+    │   │   │   └── past-grade.pdf
     │   │   └── loop runs here
     │   └── Assignment 2/
     └── MATH221/
@@ -98,12 +99,13 @@ Assignment 1/
 ├── assignment.md
 ├── outline/
 │   ├── assignment-outline.pdf
-│   ├── rubric.pdf
-│   └── past-marks.md
+│   └── rubric.pdf
 ├── sources/
-│   ├── source-01.pdf
-│   ├── source-02.md
-│   └── source-03.pdf
+│   ├── links.md
+│   └── past-grade.pdf
+│   ├── links.md
+│   ├── past-grade.pdf
+│   └── professor-feedback.docx
 └── loop.config.json        # optional
 ```
 
@@ -163,20 +165,24 @@ Rules:
 Loop-managed files should live under a hidden local directory:
 
 The generated outline index records every file under `outline/`, including PDF
-inputs and categorized past-mark or professor-feedback references.
+inputs and categorized past-mark or professor-feedback references. The source
+manifest requires `sources/links.md`, extracts its HTTP(S) links into the source
+registry, and passes optional PDF, DOCX, or text files in `sources/` as historical
+grade guidance rather than citable sources.
 
 ```text
 Assignment 1/
 ├── assignment.md
 ├── outline/
 │   ├── assignment-outline.pdf
-│   ├── rubric.pdf
-│   └── past-marks.md
+│   └── rubric.pdf
 ├── sources/
+│   ├── links.md
+│   └── past-grade.pdf
 ├── .loop/
 │   ├── state.json
 │   ├── global-plan.json
-│   ├── sources.json
+│   ├── source-index.json
 │   ├── evidence.json
 │   ├── sections/
 │   ├── reviews/
@@ -277,8 +283,9 @@ Returns structured issues rather than directly rewriting the section.
 
 Responsibilities:
 
-- Inspect user-provided sources.
-- Search external sources when permitted.
+- Read `sources/links.md` and inspect its listed web sources.
+- Read optional source-folder PDF, DOCX, and text files for past-grade guidance.
+- Search the web when permitted to open and verify the listed links.
 - Extract evidence for approved claims.
 - Capture citation metadata.
 - Record page/section locations where possible.
@@ -442,8 +449,7 @@ project/
 ├── assignment.md
 ├── outline/
 │   ├── assignment-outline.pdf
-│   ├── rubric.pdf
-│   └── past-marks.md
+│   └── rubric.pdf
 ├── sources/
 │
 ├── .loop/
@@ -451,7 +457,7 @@ project/
 │   ├── assignment.json
 │   ├── global-plan.json
 │   ├── task-graph.json
-│   ├── sources.json
+│   ├── source-index.json
 │   ├── evidence.json
 │   │
 │   ├── sections/
@@ -699,8 +705,9 @@ One manually supplied section can complete its review loop autonomously.
 
 Add the researcher between plan review and writing.
 
-- local source ingestion
-- source registry
+- `sources/links.md` ingestion
+- source registry for allowlisted web links
+- historical grade-feedback inputs (not citable)
 - evidence records
 - citation metadata
 - external research permissions

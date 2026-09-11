@@ -29,28 +29,31 @@ conversation without switching threads. The packaged TOML definitions in
 ## Usage
 
 Create an assignment directory with an `assignment.md`, an optional `outline/`
-directory, and a `sources/` directory. PDFs are accepted in both `outline/` and
-`sources/`; the outline directory does not require a file named `rubric.pdf`:
+directory, and a `sources/` directory containing the required `links.md` file.
+Optional source-folder files are historical grades or professor feedback in PDF,
+DOCX, or text format:
 
 ```text
 Desktop/3rd Year/CISC321/Assignment 1/
 ├── assignment.md
 ├── outline/
 │   ├── assignment-outline.pdf  # .md/.txt also work; filename is not fixed
-│   ├── rubric.pdf               # optional
-│   ├── past-marks.pdf           # optional
-│   └── professor-feedback.md    # optional
+│   └── rubric.pdf               # optional
 ├── sources/
+│   ├── links.md                 # required HTTP(S) links to outside sources
+│   ├── past-grade.pdf           # optional historical feedback
+│   ├── professor-feedback.docx  # optional historical feedback
+│   └── previous-comments.txt    # optional historical feedback
 └── loop.config.json       # optional
 ```
 
 Loop indexes every file under `outline/`, including nested files and PDFs. It
-classifies likely rubrics and past-mark/professor-feedback files for visibility
-in `.loop/outline-index.json`, but passes all outline artifacts to the agents so
-unusual filenames are still available. Past marks are used as preventive
-guidance: agents extract supported reasons marks were lost and turn them into
-concrete do/not-do checks, while keeping the current assignment requirements and
-rubric authoritative. They must not invent historical issues or copy old work.
+extracts each HTTP(S) link in `sources/links.md` into `.loop/source-index.json`
+as a citable web source. Optional files beside `links.md` are passed to agents as
+historical feedback only; they are never registered as citation sources. Agents
+extract supported reasons marks were lost and turn them into concrete do/not-do
+checks, while keeping the current assignment requirements and rubric
+authoritative. They must not invent historical issues or copy old work.
 Root-level `outline.md` and `rubric.*` remain supported for compatibility with
 older folders.
 
@@ -131,11 +134,13 @@ It reads only beneath that directory and writes generated state only beneath
 ```text
 Assignment 1/
 ├── assignment.md                 # immutable user input
-├── outline/                      # optional outline, rubric, and history inputs
+├── outline/                      # optional outline and rubric inputs
 │   ├── assignment-outline.pdf    # PDF, Markdown, text, and nested files work
 │   ├── rubric.pdf                # optional
-│   └── past-marks.md             # optional professor feedback/history
-├── sources/                      # source files, indexed as S01, S02, ...
+├── sources/                      # required links + optional grade feedback
+│   ├── links.md                 # required outside-source links
+│   ├── past-grade.pdf           # optional; not citable
+│   └── professor-feedback.docx  # optional; not citable
 ├── .loop/
 │   ├── state.json                # resumable run state
 │   ├── assignment.json           # input references, not a transcript
@@ -154,7 +159,7 @@ Assignment 1/
     └── final.md or final.tex
 ```
 
-Original assignment and source files are not overwritten by default. Path
+Original assignment, links, and feedback files are not overwritten by default. Path
 containment is checked before every Loop-managed write.
 
 ## Configuration
@@ -168,7 +173,7 @@ available models such as Luna High or Luna xHigh:
   "output": "markdown",
   "citation_style": "APA",
   "runtime": "conversation",
-  "external_research": false,
+  "external_research": true,
   "models": {
     "orchestrator": {"model": "gpt-5.6-luna", "effort": "xhigh"},
     "planner": {"model": "gpt-5.6-luna", "effort": "high"},
@@ -186,9 +191,10 @@ available models such as Luna High or Luna xHigh:
 }
 ```
 
-External research is disabled by default. Enabling it is a deliberate
-assignment-level choice for the future provider implementation; the initial
-conversation runtime does not silently browse or invent sources.
+External research is enabled by default so the researcher can use web search to
+open and evaluate the links in `sources/links.md`. Set `external_research` to
+`false` when an assignment must not use network access; this does not add any
+new sources to the allowlist.
 
 ## Architecture
 
@@ -251,10 +257,11 @@ stream their activity itself.
 The initial scheduler exposes dependency-aware bounded batches but executes the
 batch serially so shared evidence updates remain deterministic. A provider can
 replace that runtime with bounded parallel workers without changing the state or
-artifact contracts. PDF inputs are accepted and passed to native agents by
+artifact contracts. PDF/DOCX inputs are accepted and passed to native agents by
 reference; provider-specific PDF/DOCX text extraction for the deterministic
-local runtime, external search, richer citation styles, and a live GUI remain
-follow-on adapters rather than hidden assumptions.
+local runtime, richer citation styles, and a live GUI remain follow-on adapters
+rather than hidden assumptions. Native researcher subagents use their web
+search access to inspect the links from `sources/links.md`.
 
 ## Verification
 

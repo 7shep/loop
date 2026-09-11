@@ -194,7 +194,14 @@ class LoopOrchestrator:
             manifest["user_request_file"] = ".loop/request.md"
         self.store.write_json(".loop/assignment.json", manifest)
         self.store.write_json(".loop/outline-index.json", self.workspace.outline_index())
-        self.store.write_json(".loop/source-index.json", {"sources": self.workspace.source_index()})
+        self.store.write_json(
+            ".loop/source-index.json",
+            {
+                "links_file": manifest["links_file"],
+                "feedback_files": manifest["source_feedback_files"],
+                "sources": self.workspace.source_index(),
+            },
+        )
         self.store.write_json(".loop/evidence.json", {"evidence": []})
         save_state(self.store, self.state)
         self.events.emit("RUN_INITIALIZED", workspace_root=str(self.workspace.root))
@@ -209,6 +216,7 @@ class LoopOrchestrator:
         if manifest.get("user_request_file"):
             refs.append(manifest["user_request_file"])
         refs.extend(self._outline_refs(manifest))
+        refs.extend(self._source_refs(manifest))
         refs.append(".loop/source-index.json")
         task = self._task(
             role="orchestrator",
@@ -296,7 +304,7 @@ class LoopOrchestrator:
                             role="reviewer",
                             mode="plan_review",
                             section=section,
-                            input_refs=self._with_outline_refs(
+                            input_refs=self._with_context_refs(
                                 [self._section_ref(section, "plan.json"), ".loop/global-plan.json", "assignment.md"]
                             ),
                             output_ref=self._section_ref(section, "plan-review.json"),
@@ -324,7 +332,7 @@ class LoopOrchestrator:
                             role="researcher",
                             mode="research",
                             section=section,
-                            input_refs=self._with_outline_refs(
+                            input_refs=self._with_context_refs(
                                 [self._section_ref(section, "plan.json"), ".loop/source-index.json"]
                             ),
                             output_ref=self._section_ref(section, "research.json"),
@@ -345,7 +353,7 @@ class LoopOrchestrator:
                             role="writer",
                             mode="section_draft",
                             section=section,
-                            input_refs=self._with_outline_refs(
+                            input_refs=self._with_context_refs(
                                 [
                                     self._section_ref(section, "plan.json"),
                                     self._section_ref(section, "research.json"),
@@ -369,7 +377,7 @@ class LoopOrchestrator:
                             role="reviewer",
                             mode="writing_review",
                             section=section,
-                            input_refs=self._with_outline_refs(
+                            input_refs=self._with_context_refs(
                                 [
                                     self._section_ref(section, "draft.md"),
                                     self._section_ref(section, "plan.json"),
@@ -441,7 +449,7 @@ class LoopOrchestrator:
                 self._task(
                     role="global_reviewer",
                     mode="global_review",
-                    input_refs=self._with_outline_refs(
+                    input_refs=self._with_context_refs(
                         [draft_ref, "assignment.md", ".loop/global-plan.json", ".loop/source-index.json"]
                     ),
                     output_ref=".loop/reviews/global-review.json",
@@ -518,6 +526,7 @@ class LoopOrchestrator:
         task_metadata = dict(metadata or {})
         task_metadata["role_contract"] = role_definitions()[role].to_dict()
         task_metadata["outline_guidance"] = self._outline_guidance_metadata()
+        task_metadata["source_guidance"] = self._source_guidance_metadata()
         if section:
             task_metadata["section"] = {
                 "id": section.id,
@@ -536,7 +545,10 @@ class LoopOrchestrator:
             model=role_config.model,
             effort=role_config.effort,
             timeout_seconds=role_config.timeout_seconds,
-            instructions=f"{instructions}\n\n{self._outline_guidance_instructions()}",
+            instructions=(
+                f"{instructions}\n\n{self._outline_guidance_instructions()}\n\n"
+                f"{self._source_guidance_instructions(role)}"
+            ),
             metadata=task_metadata,
         )
 
@@ -634,7 +646,7 @@ class LoopOrchestrator:
         if self.store.exists(".loop/request.md"):
             refs.append(".loop/request.md")
         refs.extend([".loop/global-plan.json", ".loop/source-index.json"])
-        return self._with_outline_refs(refs)
+        return self._with_context_refs(refs)
 
     def _outline_refs(self, manifest: dict[str, Any] | None = None) -> list[str]:
         """Return all assignment-outline references, including legacy inputs."""
@@ -652,8 +664,24 @@ class LoopOrchestrator:
                     refs.append(str(manifest[key]))
         return list(dict.fromkeys(refs))
 
-    def _with_outline_refs(self, refs: list[str]) -> list[str]:
-        return list(dict.fromkeys([*refs, *self._outline_refs()]))
+    def _source_refs(self, manifest: dict[str, Any] | None = None) -> list[str]:
+        """Return the canonical links file and historical source feedback refs."""
+
+        if manifest is None:
+            manifest = self.store.read_json(".loop/assignment.json")
+        refs: list[str] = []
+        links_file = manifest.get("links_file")
+        if links_file:
+            refs.append(str(links_file))
+        feedback_files = manifest.get("source_feedback_files", [])
+        if isinstance(feedback_files, list):
+            refs.extend(str(item) for item in feedback_files)
+        return list(dict.fromkeys(refs))
+
+    def _with_context_refs(self, refs: list[str]) -> list[str]:
+        """Add all current assignment guidance and source inputs to a task."""
+
+        return list(dict.fromkeys([*refs, *self._outline_refs(), *self._source_refs()]))
 
     def _outline_guidance_metadata(self) -> dict[str, Any]:
         if self.store.exists(".loop/outline-index.json"):
@@ -665,6 +693,51 @@ class LoopOrchestrator:
                     "past_mark_guidance": index.get("past_mark_guidance", {}),
                 }
         return {"outline_files": [], "past_marks_files": [], "past_mark_guidance": {}}
+
+    def _source_guidance_metadata(self) -> dict[str, Any]:
+        manifest = self.store.read_json(".loop/assignment.json")
+        return {
+            "source_dir": manifest.get("source_dir"),
+            "links_file": manifest.get("links_file"),
+            "feedback_files": manifest.get("source_feedback_files", []),
+            "web_search_enabled": self.config.external_research,
+            "feedback_is_citable": False,
+        }
+
+    def _source_guidance_instructions(self, role: str) -> str:
+        guidance = self._source_guidance_metadata()
+        links_file = guidance.get("links_file") or "sources/links.md"
+        feedback_files = guidance.get("feedback_files") or []
+        lines = [
+            "Source inputs:",
+            f"Read {links_file}; it is the required allowlist of outside sources for this assignment.",
+            "The citable S## records in .loop/source-index.json correspond to the HTTP(S) links in that file.",
+            "Optional files under sources/ are past-grade or professor-feedback records, not citation sources.",
+            "Never cite a feedback artifact or introduce a source that is not represented in links.md.",
+        ]
+        if feedback_files:
+            lines.append("Read every listed source feedback artifact when relevant: " + ", ".join(feedback_files) + ".")
+            lines.append(
+                "Extract only supported reasons marks were lost and turn them into concrete do/not-do checks; do not copy prior work."
+            )
+        if guidance.get("web_search_enabled") and role != "researcher":
+            lines.append(
+                "Web search access is available to native subagents for inspecting the allowlisted links; use the research artifact as the citation and evidence authority."
+            )
+        if role == "researcher":
+            if guidance.get("web_search_enabled"):
+                lines.extend(
+                    [
+                        "Web search is enabled for this research task.",
+                        "Use web search/browser access to open and evaluate the relevant links from links.md before recording evidence.",
+                        "If a linked page is unavailable or does not support a claim, report that clearly and do not silently substitute an unlisted source.",
+                    ]
+                )
+            else:
+                lines.append(
+                    "Web search is disabled by configuration; do not claim to have inspected linked pages you could not access."
+                )
+        return "\n".join(lines)
 
     def _outline_guidance_instructions(self) -> str:
         guidance = self._outline_guidance_metadata()

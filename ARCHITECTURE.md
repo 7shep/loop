@@ -150,8 +150,10 @@ Desktop/
             ├── outline/
             │   ├── assignment-outline.pdf
             │   ├── rubric.pdf
-            │   └── past-marks.md
+            │   └── notes.md
             ├── sources/
+            │   ├── links.md
+            │   └── past-grade.pdf
             ├── .loop/
             └── output/
 ```
@@ -165,7 +167,10 @@ Loop indexes every file in that directory in `.loop/outline-index.json` and
 passes the references to the relevant roles. Historical feedback is converted
 by reasoning agents into supported do/not-do checks, while the current outline
 and rubric remain authoritative. Root-level `outline.md` and `rubric.*` remain
-supported as a compatibility path.
+supported as a compatibility path. `sources/links.md` is required. Its HTTP(S)
+links become the only registered citation sources, while optional PDF, DOCX, and
+text files in `sources/` are passed as historical grade-feedback guidance and
+are never citable.
 
 ```ts
 interface Workspace {
@@ -207,8 +212,10 @@ Assignment 1/
 ├── outline/
 │   ├── assignment-outline.pdf
 │   ├── rubric.pdf
-│   └── past-marks.md
+│   └── notes.md
 ├── sources/
+│   ├── links.md
+│   └── past-grade.pdf
 │
 ├── .loop/
 │   ├── state.json
@@ -535,9 +542,10 @@ GPT-5.6 Luna High
 
 - approved section plan
 - source registry
-- user-provided source files
+- `sources/links.md` and its allowlisted HTTP(S) links
+- optional PDF, DOCX, and text grade-feedback files under `sources/`
 - outline guidance and any past-mark/professor-feedback artifacts
-- research permissions
+- web-search permission
 
 ### Output
 
@@ -653,18 +661,20 @@ All sources should have canonical internal IDs.
 
 ```json
 {
-  "id": "S03",
+  "id": "S01",
   "title": "Example Source",
-  "authors": ["Jane Smith"],
-  "year": 2024,
-  "type": "journal",
-  "path": "sources/example.pdf",
-  "url": null,
+  "authors": [],
+  "year": null,
+  "type": "web",
+  "path": "sources/links.md",
+  "url": "https://example.com/source",
   "verified": true
 }
 ```
 
-The source registry is the authoritative list of allowed citations.
+The source registry is the authoritative list of allowed citations. It is
+derived from the HTTP(S) links in the required `sources/links.md`; optional
+grade-feedback files are not registered sources.
 
 ---
 
@@ -977,8 +987,8 @@ no final document writes
 ### Researcher
 
 ```text
-read source files
-web access if enabled
+read sources/links.md and optional grade-feedback files
+use web search to inspect relevant links when enabled
 write research/evidence artifacts
 ```
 
