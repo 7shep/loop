@@ -309,8 +309,14 @@ Responsibilities:
 - Follow requested citation style.
 - Respect section word targets.
 - Address reviewer feedback on revision cycles.
+- Invoke the `humanizer` skill in embedded mode after drafting and before
+  writing the declared draft artifact.
+- Preserve every supported claim, required heading and format, and all
+  registered `[S##]` citation markers through the humanizer pass.
 
-The writer should cite only sources present in the structured source/evidence store.
+The writer should cite only sources present in the structured source/evidence
+store. The humanizer is a required writer substep, not a separate agent or
+state-machine stage. It edits prose only and does not research or add claims.
 
 ---
 
@@ -363,9 +369,12 @@ Detailed behavior:
 2. Reviewer evaluates the plan.
 3. If rejected, feedback returns to planner.
 4. Once approved, researcher gathers evidence.
-5. Writer creates `draft.md` or the configured intermediate representation.
-6. Reviewer evaluates the draft.
-7. If rejected, issues return to writer.
+5. Writer creates the draft, invokes the required `humanizer` skill, verifies
+   claim and citation-marker preservation, and writes `draft.md` or the
+   configured intermediate representation.
+6. Reviewer evaluates the humanized draft.
+7. If rejected, issues return to writer, who reruns the humanizer pass after
+   revising.
 8. Once approved, orchestrator commits the section.
 
 No reviewer should directly modify the final document.

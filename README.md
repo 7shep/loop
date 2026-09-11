@@ -24,7 +24,9 @@ Codex/Work environment. Its primary path asks the native Codex/Work runtime to
 spawn role-specific subagents, so the user sees their activity in the parent
 conversation without switching threads. The packaged TOML definitions in
 `skills/loop/agents/` can be copied to `~/.codex/agents/` or to the assignment's
-`.codex/agents/` for named role defaults.
+`.codex/agents/` for named role defaults. Install or copy the companion
+[humanizer skill](skills/humanizer/SKILL.md) under the `humanizer` name as well;
+it is a required final writer pass.
 
 ## Usage
 
@@ -76,7 +78,10 @@ From the active assignment folder, invoke the skill in the parent conversation:
 
 The parent Loop conversation creates the state machine, then delegates planner,
 researcher, writer, and reviewer work to native subagents. Their activity and
-results remain visible in the Codex CLI/Work parent session.
+results remain visible in the Codex CLI/Work parent session. Each writer drafts
+from the approved evidence and then invokes `$humanizer` in embedded mode before
+writing its section draft. The skill edits prose only, preserving supported
+claims, headings, format, and `[S##]` citation markers.
 
 The deterministic control commands used by the parent workflow are:
 
@@ -91,8 +96,9 @@ loop resume . --runtime conversation
 
 The parent repeats the handoff until Loop reports `completed`. Each task
 manifest names the role, model/effort mapping, artifact inputs, output path, and
-contract. If native delegation is unavailable, the parent may complete the
-manifest itself as a fallback; that preserves correctness but does not show
+contract, including any `required_skills`. If native delegation is unavailable,
+the parent may complete the manifest itself as a fallback and must invoke
+`$humanizer` for writer tasks; that preserves correctness but does not show
 separate child-agent activity.
 
 Useful controls:
@@ -128,8 +134,10 @@ PLAN → PLAN_REVIEW → RESEARCH → WRITE → WRITING_REVIEW → COMMITTED
 Plan or writing review can send a section back for a bounded revision. Research
 records source IDs, evidence IDs, locations, paraphrases, and confidence before
 the writer runs. Writers may cite only registered source IDs, represented during
-generation as markers such as `[S01]`. The deterministic document builder
-normalizes those markers and creates the bibliography.
+generation as markers such as `[S01]`. After drafting, the writer invokes the
+required humanizer pass and verifies that the same citation markers and claims
+survive. The deterministic document builder normalizes those markers and creates
+the bibliography.
 
 After assembly, the global reviewer returns `PASS` or structured issues with
 affected section IDs. A failed global review reopens only those sections and
@@ -272,7 +280,8 @@ artifact contracts. PDF/DOCX inputs are accepted and passed to native agents by
 reference; provider-specific PDF/DOCX text extraction for the deterministic
 local runtime, richer citation styles, and a live GUI remain follow-on adapters
 rather than hidden assumptions. Native researcher subagents use their web
-search access to inspect the links from `sources/links.md`.
+search access to inspect the links from `sources/links.md`. The humanizer skill
+does not add a network or source lookup step.
 
 ## Verification
 

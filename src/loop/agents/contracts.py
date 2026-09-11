@@ -14,6 +14,7 @@ class AgentRole:
     output_schema: str
     allowed_reads: tuple[str, ...]
     allowed_writes: tuple[str, ...]
+    required_skills: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -34,6 +35,7 @@ class AgentTask:
     instructions: str
     metadata: dict[str, Any] = field(default_factory=dict)
     thread_id: str | None = None
+    required_skills: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
@@ -82,11 +84,12 @@ _ROLE_DEFINITIONS: dict[str, AgentRole] = {
     ),
     "writer": AgentRole(
         "writer",
-        "Draft a section using only its approved plan and registered evidence.",
-        "approved plan + relevant evidence + style rules",
-        "section draft",
+        "Draft and humanize a section using only its approved plan and registered evidence.",
+        "approved plan + relevant evidence + style rules + humanizer skill",
+        "humanized section draft",
         ("assignment.md", "outline-index.json", "outline/**", "sources/links.md", "sources/**", "section plan.json", "research.json", "evidence.json"),
         ("section draft.md",),
+        ("humanizer",),
     ),
     "reviewer": AgentRole(
         "reviewer",

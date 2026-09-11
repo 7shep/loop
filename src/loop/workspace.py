@@ -72,6 +72,10 @@ subagent. Follow the task manifest in `.loop/tasks/`, mark the task complete,
 and resume the run as described by the Loop skill. For a local smoke test that
 does not use model access, run `loop run . --runtime demo` instead.
 
+Writer tasks require the `humanizer` skill. The writer invokes it after drafting
+and before writing the section draft so the final prose is natural while its
+claims and `[S##]` citation markers remain intact.
+
 Useful commands:
 
 ```bash

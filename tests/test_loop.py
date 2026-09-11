@@ -44,6 +44,17 @@ class ReopenOnceRuntime(DemoAgentRuntime):
         return super().run(task, store)
 
 
+class PauseOnWriterRuntime(DemoAgentRuntime):
+    def __init__(self) -> None:
+        self.writer_task = None
+
+    def run(self, task, store):
+        if task.role == "writer":
+            self.writer_task = task
+            return AgentResult(status="waiting", error="inspect writer contract")
+        return super().run(task, store)
+
+
 def add_required_sources(root: Path, links: str = "[Example source](https://example.com/source)\n") -> Path:
     sources = root / "sources"
     sources.mkdir()
@@ -89,6 +100,7 @@ class LoopFoundationTests(unittest.TestCase):
             self.assertIn("Describe the task to complete.", assignment.read_text(encoding="utf-8"))
             self.assertIn("HTTP(S)", links.read_text(encoding="utf-8"))
             self.assertIn("loop run .", readme.read_text(encoding="utf-8"))
+            self.assertIn("humanizer", readme.read_text(encoding="utf-8"))
             self.assertTrue(result["created"])
             self.assertFalse(result["existing"])
 
@@ -242,6 +254,28 @@ class LoopFoundationTests(unittest.TestCase):
             self.assertEqual(task["metadata"]["source_guidance"]["feedback_files"], ["sources/past-grade.pdf"])
             self.assertTrue(task["metadata"]["source_guidance"]["web_search_enabled"])
             self.assertTrue((root / ".loop" / "outline-index.json").exists())
+
+    def test_writer_task_requires_humanizer_in_contract_and_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "assignment.md").write_text("Complete the assignment.", encoding="utf-8")
+            add_required_sources(root)
+            runtime = PauseOnWriterRuntime()
+            orchestrator = LoopOrchestrator(
+                Workspace.discover(root), config=LoopConfig(runtime="demo"), runtime=runtime
+            )
+
+            result = orchestrator.run()
+
+            self.assertEqual(result.status, "paused")
+            self.assertIsNotNone(runtime.writer_task)
+            task = runtime.writer_task
+            self.assertEqual(task.required_skills, ("humanizer",))
+            manifest = task.to_dict()
+            self.assertEqual(manifest["required_skills"], ("humanizer",))
+            self.assertEqual(manifest["metadata"]["required_skills"], ["humanizer"])
+            self.assertIn("invoke `$humanizer`", task.instructions)
+            self.assertIn("citation marker", task.instructions)
 
     def test_sources_require_links_and_index_only_external_links(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

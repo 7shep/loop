@@ -12,6 +12,11 @@ reviewed Markdown or LaTeX deliverable. The current directory is the assignment
 root. Do not inspect parent folders, sibling assignments, or unrelated projects
 unless the user explicitly names a path.
 
+Loop's writer contract requires the companion `humanizer` skill. Install or copy
+`skills/humanizer/SKILL.md` into the active Codex/Work skills directory under the
+name `humanizer`, alongside this skill. The humanizer is a writer substep, not a
+separate Loop state or agent.
+
 ## Create an assignment workspace
 
 From a class or course directory, create a named assignment workspace with:
@@ -92,7 +97,9 @@ user to switch threads.
    installed into the host's agent directory. Otherwise spawn the host's
    default agent and apply the role contract from the manifest directly. Ask
    the child to read only the listed artifacts, write only the declared output,
-   and return a concise summary.
+   and return a concise summary. When the manifest's `required_skills` includes
+   `humanizer`, the child must invoke `$humanizer` in embedded mode after
+   drafting and before writing its output.
    Native Codex/Work delegation makes the child activity visible in the parent
    conversation and preserves its agent thread for inspection.
    If the host exposes the child thread ID, bind it with
@@ -112,8 +119,10 @@ approved section into the assembled document.
 
 When native subagent delegation is unavailable in the host, use the same task
 manifest flow as a fallback: complete the manifest as a scoped role task in the
-visible conversation and mark it complete. This fallback preserves correctness
-but does not provide separate child-agent activity.
+visible conversation and mark it complete. For a writer task, invoke
+`$humanizer` in the visible conversation before writing the declared draft path;
+do not silently skip a required skill. This fallback preserves correctness but
+does not provide separate child-agent activity.
 
 ## Role boundaries
 
@@ -123,8 +132,19 @@ but does not provide separate child-agent activity.
   commit the document.
 - Researcher: record traceable evidence and source IDs; do not write prose.
 - Writer: use only registered evidence and internal citation markers such as
-  `[S01]`; do not introduce a new source.
+  `[S01]`; invoke `$humanizer` as the final prose pass; preserve claims,
+  headings, format, and citation markers; do not introduce a new source.
 - Global reviewer: return `PASS` or structured issues with affected section IDs.
+
+## Writer quality pass
+
+The writer first drafts against the approved plan and evidence, then sends the
+complete draft through `$humanizer` in embedded mode. The skill removes
+AI-sounding structure and filler while preserving the assignment's meaning,
+evidence, citation markers, headings, and requested format. The writer writes
+only the humanizer result to the declared `draft.md` path and returns no
+humanizer commentary in that artifact. The normal writing reviewer still runs
+after this pass; humanization does not replace evidence or rubric review.
 
 All roles must use the indexed outline artifacts as assignment constraints. When
 past-mark or professor-feedback artifacts exist, they must carry the extracted
