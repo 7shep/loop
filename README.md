@@ -42,9 +42,9 @@ starter `README.md` that explains the workflow. Existing files are preserved,
 so initializing the same assignment again is safe.
 
 Create an assignment directory with an `assignment.md`, an optional `outline/`
-directory, and a `sources/` directory containing the required `links.md` file.
-Optional source-folder files are historical grades or professor feedback in PDF,
-DOCX, or text format:
+directory, and an optional `sources/` directory. If the assignment uses outside
+sources, put their links in `sources/links.md`. Optional source-folder files are
+historical grades or professor feedback in PDF, DOCX, or text format:
 
 ```text
 Desktop/3rd Year/CISC321/Assignment 1/
@@ -53,16 +53,17 @@ Desktop/3rd Year/CISC321/Assignment 1/
 │   ├── assignment-outline.pdf  # .md/.txt also work; filename is not fixed
 │   └── rubric.pdf               # optional
 ├── sources/
-│   ├── links.md                 # required HTTP(S) links to outside sources
+│   ├── links.md                 # optional HTTP(S) links to outside sources
 │   ├── past-grade.pdf           # optional historical feedback
 │   ├── professor-feedback.docx  # optional historical feedback
 │   └── previous-comments.txt    # optional historical feedback
 └── loop.config.json       # optional
 ```
 
-Loop indexes every file under `outline/`, including nested files and PDFs. It
-extracts each HTTP(S) link in `sources/links.md` into `.loop/source-index.json`
-as a citable web source. Optional files beside `links.md` are passed to agents as
+Loop indexes every file under `outline/`, including nested files and PDFs. When
+`sources/links.md` is present, Loop extracts each HTTP(S) link into
+`.loop/source-index.json` as a citable web source. An empty or missing links file
+is valid for assignments that do not use outside sources. Optional files beside `links.md` are passed to agents as
 historical feedback only; they are never registered as citation sources. Agents
 extract supported reasons marks were lost and turn them into concrete do/not-do
 checks, while keeping the current assignment requirements and rubric
@@ -156,8 +157,8 @@ Assignment 1/
 ├── outline/                      # optional outline and rubric inputs
 │   ├── assignment-outline.pdf    # PDF, Markdown, text, and nested files work
 │   ├── rubric.pdf                # optional
-├── sources/                      # required links + optional grade feedback
-│   ├── links.md                 # required outside-source links
+├── sources/                      # optional links + optional grade feedback
+│   ├── links.md                 # optional outside-source links
 │   ├── past-grade.pdf           # optional; not citable
 │   └── professor-feedback.docx  # optional; not citable
 ├── .loop/
