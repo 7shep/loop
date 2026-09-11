@@ -20,9 +20,11 @@ python -m pip install -e .
 
 The reusable Codex workflow entry point is [skills/loop/SKILL.md](skills/loop/SKILL.md).
 Install or copy that skill into the Codex skills directory used by the active
-Codex/Work environment. The skill is designed to use the installed `loop`
-command through the conversation's tool surface, so the user does not need to
-launch a second terminal or switch agent threads.
+Codex/Work environment. Its primary path asks the native Codex/Work runtime to
+spawn role-specific subagents, so the user sees their activity in the parent
+conversation without switching threads. The packaged TOML definitions in
+`skills/loop/agents/` can be copied to `~/.codex/agents/` or to the assignment's
+`.codex/agents/` for named role defaults.
 
 ## Usage
 
@@ -38,21 +40,32 @@ Desktop/3rd Year/CISC321/Assignment 1/
 └── loop.config.json       # optional
 ```
 
-From the active assignment folder, the Codex workflow is:
+From the active assignment folder, invoke the skill in the parent conversation:
+
+```text
+> $loop Complete the assignment in this folder using the supplied sources.
+```
+
+The parent Loop conversation creates the state machine, then delegates planner,
+researcher, writer, and reviewer work to native subagents. Their activity and
+results remain visible in the Codex CLI/Work parent session.
+
+The deterministic control commands used by the parent workflow are:
 
 ```bash
-loop run . --runtime conversation
+loop run . --runtime conversation --request "Complete the assignment in this folder using the supplied sources."
 loop tasks . --json
-# The active Codex/Work conversation completes the declared task artifact.
+# The parent conversation delegates the pending task to a native subagent.
 loop task-complete . --task-id <task-id>
+loop task-bind . --task-id <task-id> --thread-id <native-thread-id>
 loop resume . --runtime conversation
 ```
 
-Repeat the task/complete/resume handoff until Loop reports `completed`. In the
-conversation, each task manifest names the role, input artifact references,
-output path, model/effort mapping, and allowed scope. The visible conversation
-performs the reasoning task; it does not need to create or manage separate user
-threads.
+The parent repeats the handoff until Loop reports `completed`. Each task
+manifest names the role, model/effort mapping, artifact inputs, output path, and
+contract. If native delegation is unavailable, the parent may complete the
+manifest itself as a fallback; that preserves correctness but does not show
+separate child-agent activity.
 
 Useful controls:
 
@@ -188,6 +201,7 @@ src/loop/
 ├── agents/contracts.py            # role and task contracts
 ├── agents/conversation.py         # Codex/Work manifest adapter
 ├── agents/demo.py                 # deterministic smoke runtime
+├── runtime/                        # provider/runtime export seam
 ├── schemas.py                     # runtime validation
 ├── document.py                    # deterministic assembly/citations
 └── events.py                      # JSONL event stream
@@ -200,13 +214,22 @@ implementation.
 
 ## First-version boundaries
 
-The local package does not hard-code a Codex SDK, API key, or subscription
-endpoint. `ConversationAgentRuntime` queues a least-privilege task manifest and
-consumes the artifact completed by the active conversation. This is the
-provider seam for real internal Codex thread/session delegation later. Until a
-host exposes that delegation API, the roles are isolated by contracts and
-artifacts within the one visible conversation rather than pretending that local
-code has created hidden threads.
+Native Codex/Work delegation is the intended execution surface. The parent
+skill delegates each manifest to a native child agent and then uses the local
+orchestrator to validate the artifact and advance state. This provides visible
+child-agent activity in the same parent conversation. The local package does
+not call a private API or require a separate API key; it uses the host's
+authenticated subagent capability.
+
+Codex CLI and ChatGPT Work must have native subagents enabled for that activity
+to appear. The packaged role definitions follow the host's custom-agent format;
+copy them to the host's global agent directory or the active assignment's
+project-scoped `.codex/agents/` during setup.
+
+`ConversationAgentRuntime` remains the portable fallback for hosts that expose
+file tools but not native subagent delegation. It queues a least-privilege task
+manifest for the parent session to complete, but cannot create child threads or
+stream their activity itself.
 
 The initial scheduler exposes dependency-aware bounded batches but executes the
 batch serially so shared evidence updates remain deterministic. A provider can

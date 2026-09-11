@@ -12,6 +12,8 @@
     "loop_dir": {"type": "string"},
     "output_dir": {"type": "string"},
     "sections": {"type": "object"},
-    "graph": {"type": "object"}
+    "graph": {"type": "object"},
+    "agent_failures": {"type": "integer", "minimum": 0},
+    "agent_threads": {"type": "object"}
   }
 }

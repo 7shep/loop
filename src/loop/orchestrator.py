@@ -56,6 +56,7 @@ class LoopOrchestrator:
         config: LoopConfig | None = None,
         runtime: AgentRuntime | None = None,
         reporter: Callable[[str], None] | None = None,
+        request: str | None = None,
     ) -> None:
         self.workspace = workspace
         self.store = ArtifactStore(workspace)
@@ -64,6 +65,7 @@ class LoopOrchestrator:
             DemoAgentRuntime() if self.config.runtime == "demo" else CodexConversationRuntime()
         )
         self.reporter = reporter
+        self.request = request.strip() if request and request.strip() else None
         self.state: RunState | None = None
         self.events: EventLog | None = None
 
@@ -161,6 +163,7 @@ class LoopOrchestrator:
             "sections": section_counts(self.state),
             "global_review_cycle": self.state.global_review_cycle,
             "agent_failures": self.state.agent_failures,
+            "agent_threads": self.state.agent_threads,
             "waiting_for_task": self.state.waiting_for_task,
             "last_error": self.state.last_error,
             "termination_reason": self.state.termination_reason,
@@ -182,6 +185,9 @@ class LoopOrchestrator:
             config=self.config.to_dict(),
         )
         self.events = EventLog(self.store, self.state.run_id, self.reporter)
+        if self.request:
+            self.store.write_text(".loop/request.md", self.request + "\n")
+            manifest["user_request_file"] = ".loop/request.md"
         self.store.write_json(".loop/assignment.json", manifest)
         self.store.write_json(".loop/source-index.json", {"sources": self.workspace.source_index()})
         self.store.write_json(".loop/evidence.json", {"evidence": []})
@@ -195,6 +201,8 @@ class LoopOrchestrator:
         self.events.emit("GLOBAL_PLAN_STARTED")
         manifest = self.store.read_json(".loop/assignment.json")
         refs = [manifest["assignment_file"]]
+        if manifest.get("user_request_file"):
+            refs.append(manifest["user_request_file"])
         if manifest.get("outline_file"):
             refs.append(manifest["outline_file"])
         if manifest.get("rubric_file"):
@@ -271,7 +279,7 @@ class LoopOrchestrator:
                             role="planner",
                             mode="section_plan",
                             section=section,
-                            input_refs=["assignment.md", ".loop/global-plan.json", ".loop/source-index.json"],
+                            input_refs=self._section_input_refs(),
                             output_ref=self._section_ref(section, "plan.json"),
                             output_kind="json",
                             instructions="Create the structured plan for this section; do not write final prose.",
@@ -546,6 +554,8 @@ class LoopOrchestrator:
             if isinstance(result.output, str) and not self.store.exists(task.output_ref):
                 self.store.write_text(task.output_ref, result.output)
         self.events.emit("AGENT_TASK_COMPLETED", role=task.role, task_id=task.task_id, section_id=task.metadata.get("section", {}).get("id"))
+        if task.task_id in self.state.agent_threads:
+            self.state.agent_threads[task.task_id]["status"] = "completed"
         if section:
             section.current_task_id = None
         save_state(self.store, self.state)
@@ -604,6 +614,13 @@ class LoopOrchestrator:
     def _section_ref(self, section: SectionState, name: str) -> str:
         safe_id = re.sub(r"[^a-zA-Z0-9_-]", "-", section.id)
         return f".loop/sections/{section.order + 1:02d}-{safe_id}/{name}"
+
+    def _section_input_refs(self) -> list[str]:
+        refs = ["assignment.md"]
+        if self.store.exists(".loop/request.md"):
+            refs.append(".loop/request.md")
+        refs.extend([".loop/global-plan.json", ".loop/source-index.json"])
+        return refs
 
     def _graph_stage(self, section_id: str, status: str) -> None:
         mapping = {

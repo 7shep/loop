@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 from loop.agents.demo import DemoAgentRuntime
 from loop.agents.conversation import ConversationAgentRuntime
 from loop.agents.contracts import AgentResult
+from loop.cli import main
 from loop.config import LoopConfig
 from loop.graph import GraphError, TaskGraph
 from loop.orchestrator import LoopOrchestrator
@@ -73,7 +74,10 @@ class LoopFoundationTests(unittest.TestCase):
             )
             config = LoopConfig(runtime="demo")
             orchestrator = LoopOrchestrator(
-                Workspace.discover(root), config=config, runtime=DemoAgentRuntime()
+                Workspace.discover(root),
+                config=config,
+                runtime=DemoAgentRuntime(),
+                request="Complete this assignment using the supplied sources.",
             )
             result = orchestrator.run()
 
@@ -87,6 +91,7 @@ class LoopFoundationTests(unittest.TestCase):
             )
             self.assertEqual(review["decision"], "PASS")
             self.assertIn("References", (root / "output" / "final.md").read_text(encoding="utf-8"))
+            self.assertTrue((root / ".loop" / "request.md").exists())
 
     def test_conversation_runtime_persists_a_resumable_task_handoff(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -100,6 +105,9 @@ class LoopFoundationTests(unittest.TestCase):
             self.assertEqual(first.status, "paused")
             task_id = json.loads((root / ".loop" / "state.json").read_text(encoding="utf-8"))["waiting_for_task"]
             manifest_path = root / ".loop" / "tasks" / f"{task_id}.json"
+            self.assertEqual(main(["task-bind", str(root), "--task-id", task_id, "--thread-id", "thread-123"]), 0)
+            bound_state = json.loads((root / ".loop" / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(bound_state["agent_threads"][task_id]["thread_id"], "thread-123")
             (root / ".loop" / "global-plan.json").write_text(
                 json.dumps(
                     {

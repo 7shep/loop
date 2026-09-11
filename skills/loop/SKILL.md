@@ -12,28 +12,46 @@ reviewed Markdown or LaTeX deliverable. The current directory is the assignment
 root. Do not inspect parent folders, sibling assignments, or unrelated projects
 unless the user explicitly names a path.
 
-## Conversation execution
+## Native subagent execution
 
-Use the installed `loop` command through the available Codex tool surface; the
-user should not need to open another terminal or switch agent threads.
+This is the primary path. The visible Loop conversation is the orchestrator;
+native Codex/Work subagents perform the specialist tasks. When the user invokes
+`$loop <request>`, do not do every role in the parent thread and do not ask the
+user to switch threads.
 
-1. Start or continue the run with `loop run . --runtime conversation`.
-2. If the run pauses, inspect `loop tasks . --json` and read the pending task
-   manifest under `.loop/tasks/`. It contains the role, model/effort mapping,
-   input artifact references, output path, and contract.
-3. Perform exactly that role as a scoped internal task. Read the referenced
-   artifacts rather than passing large transcripts. Write only the declared
-   output artifact under `.loop/` or the section draft path. Reviewers write
-   review artifacts and never mutate committed output.
-4. Validate structured JSON against the contract in the manifest. Mark the task
-   complete with `loop task-complete . --task-id <task-id>`.
-5. Resume with `loop resume . --runtime conversation` and repeat until Loop
-   reports `completed`, `failed`, or `cancelled`.
+1. Capture the request and start the local state machine with
+   `loop run . --runtime conversation --request "<request>"`. The command
+   initializes `.loop/` and emits the next structured task manifest.
+2. Read the pending manifest under `.loop/tasks/`. It names the role, model and
+   reasoning effort, artifact inputs, output path, and role contract.
+3. Spawn a native subagent for that task using the matching custom agent from
+   `agents/` (`loop_planner`, `loop_researcher`, `loop_writer`,
+   `loop_reviewer`, or `loop_global_reviewer`) when those definitions have been
+   installed into the host's agent directory. Otherwise spawn the host's
+   default agent and apply the role contract from the manifest directly. Ask
+   the child to read only the listed artifacts, write only the declared output,
+   and return a concise summary.
+   Native Codex/Work delegation makes the child activity visible in the parent
+   conversation and preserves its agent thread for inspection.
+   If the host exposes the child thread ID, bind it with
+   `loop task-bind . --task-id <task-id> --thread-id <thread-id>` so resume
+   state can track the child.
+4. After the child completes, validate its JSON/text artifact, run
+   `loop task-complete . --task-id <task-id>`, then run
+   `loop resume . --runtime conversation` to advance the deterministic runtime.
+5. Repeat the delegation loop until Loop reports `completed`, `failed`, or
+   `cancelled`. Keep the parent conversation's status updates short; the child
+   thread and `.loop/` artifacts hold detailed work.
 
-The runtime owns transitions, retries, dependency checks, section commits,
+The parent owns transitions, retries, dependency checks, section commits,
 assembly, and global-review routing. Do not skip a gate or manually edit
-`.loop/state.json` to force progress. The orchestrator is the only component
-that commits an approved section into the assembled document.
+`.loop/state.json`. The orchestrator is the only component that commits an
+approved section into the assembled document.
+
+When native subagent delegation is unavailable in the host, use the same task
+manifest flow as a fallback: complete the manifest as a scoped role task in the
+visible conversation and mark it complete. This fallback preserves correctness
+but does not provide separate child-agent activity.
 
 ## Role boundaries
 

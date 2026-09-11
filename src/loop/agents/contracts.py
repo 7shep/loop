@@ -33,6 +33,7 @@ class AgentTask:
     timeout_seconds: int
     instructions: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    thread_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)

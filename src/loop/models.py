@@ -110,6 +110,7 @@ class RunState:
     graph: dict[str, Any] = field(default_factory=dict)
     global_review_cycle: int = 0
     agent_failures: int = 0
+    agent_threads: dict[str, dict[str, Any]] = field(default_factory=dict)
     config: dict[str, Any] = field(default_factory=dict)
     last_error: str | None = None
     waiting_for_task: str | None = None
@@ -140,6 +141,7 @@ class RunState:
             graph=dict(value.get("graph", {})),
             global_review_cycle=int(value.get("global_review_cycle", 0)),
             agent_failures=int(value.get("agent_failures", 0)),
+            agent_threads=dict(value.get("agent_threads", {})),
             config=dict(value.get("config", {})),
             last_error=value.get("last_error"),
             waiting_for_task=value.get("waiting_for_task"),

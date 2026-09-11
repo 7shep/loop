@@ -12,6 +12,8 @@ from .agents.contracts import role_definitions
 from .artifacts.store import ArtifactStore
 from .config import load_config
 from .orchestrator import LoopOrchestrator
+from .events import EventLog
+from .state import load_state, save_state
 from .workspace import Workspace, WorkspaceError
 
 
@@ -23,6 +25,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("path", nargs="?", default=".")
     run.add_argument("--runtime", choices=("conversation", "demo"))
     run.add_argument("--config", type=Path)
+    run.add_argument("--request", help="the user request to persist with this run")
     run.add_argument("--json", action="store_true", dest="as_json")
 
     resume = commands.add_parser("resume", help="resume an interrupted or paused run")
@@ -53,15 +56,25 @@ def _parser() -> argparse.ArgumentParser:
     complete = commands.add_parser("task-complete", help="mark a queued Codex task complete")
     complete.add_argument("path", nargs="?", default=".")
     complete.add_argument("--task-id", required=True)
+
+    bind = commands.add_parser("task-bind", help="persist a native child-agent thread binding")
+    bind.add_argument("path", nargs="?", default=".")
+    bind.add_argument("--task-id", required=True)
+    bind.add_argument("--thread-id", required=True)
     return parser
 
 
-def _orchestrator(path: str, runtime_name: str | None = None, config_path: Path | None = None) -> LoopOrchestrator:
+def _orchestrator(
+    path: str,
+    runtime_name: str | None = None,
+    config_path: Path | None = None,
+    request: str | None = None,
+) -> LoopOrchestrator:
     workspace = Workspace.discover(path)
     config = load_config(workspace.root, config_path)
     if runtime_name:
         config.runtime = runtime_name
-    return LoopOrchestrator(workspace, config=config, reporter=print)
+    return LoopOrchestrator(workspace, config=config, reporter=print, request=request)
 
 
 def _print_result(result: object, as_json: bool = False) -> None:
@@ -79,7 +92,12 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(value, indent=2, ensure_ascii=False) if args.as_json else "\n".join(value))
             return 0
         if args.command in {"run", "resume"}:
-            orchestrator = _orchestrator(args.path, args.runtime, getattr(args, "config", None))
+            orchestrator = _orchestrator(
+                args.path,
+                args.runtime,
+                getattr(args, "config", None),
+                getattr(args, "request", None),
+            )
             result = orchestrator.run(resume=args.command == "resume")
             _print_result(result, args.as_json)
             return 0 if result.status not in {"failed", "cancelled"} else 1
@@ -120,6 +138,31 @@ def main(argv: list[str] | None = None) -> int:
             store = ArtifactStore(workspace)
             result_ref = ConversationAgentRuntime.complete_task(args.task_id, store)
             print(f"completed {args.task_id} ({result_ref})")
+            return 0
+        if args.command == "task-bind":
+            workspace = Workspace.discover(args.path)
+            store = ArtifactStore(workspace)
+            state = load_state(store)
+            manifest_ref = f".loop/tasks/{args.task_id}.json"
+            if not store.exists(manifest_ref):
+                raise ValueError(f"unknown task: {args.task_id}")
+            manifest = store.read_json(manifest_ref)
+            manifest["thread_id"] = args.thread_id
+            store.write_json(manifest_ref, manifest)
+            state.agent_threads[args.task_id] = {
+                "thread_id": args.thread_id,
+                "role": manifest.get("role"),
+                "section_id": manifest.get("metadata", {}).get("section", {}).get("id"),
+                "status": "running",
+            }
+            save_state(store, state)
+            EventLog(store, state.run_id).emit(
+                "AGENT_THREAD_BOUND",
+                task_id=args.task_id,
+                thread_id=args.thread_id,
+                role=manifest.get("role"),
+            )
+            print(f"bound {args.task_id} to {args.thread_id}")
             return 0
     except (WorkspaceError, ValueError, RuntimeError, OSError) as exc:
         print(f"loop: {exc}", file=sys.stderr)
