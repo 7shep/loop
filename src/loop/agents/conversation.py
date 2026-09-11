@@ -33,6 +33,7 @@ class ConversationAgentRuntime(AgentRuntime):
             return AgentResult(status="completed", output=store.read_json(task.output_ref))
 
         if not store.exists(manifest_ref):
+            store.path(task.output_ref).parent.mkdir(parents=True, exist_ok=True)
             store.write_json(manifest_ref, task.to_dict())
         return AgentResult(
             status="waiting",
