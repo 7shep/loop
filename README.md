@@ -28,6 +28,18 @@ conversation without switching threads. The packaged TOML definitions in
 
 ## Usage
 
+Initialize a new assignment workspace from its root directory:
+
+```bash
+loop init
+```
+
+This creates the canonical `assignment.md`, `outline/`, `sources/links.md`,
+`.loop/`, and `output/` layout, along with a starter `README.md` that explains
+the workflow. Existing files are preserved, so initialization is safe to run
+again. You can also initialize another existing directory with `loop init
+<path>`.
+
 Create an assignment directory with an `assignment.md`, an optional `outline/`
 directory, and a `sources/` directory containing the required `links.md` file.
 Optional source-folder files are historical grades or professor feedback in PDF,

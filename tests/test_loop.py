@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import io
 import json
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
@@ -49,6 +51,64 @@ def add_required_sources(root: Path, links: str = "[Example source](https://exam
 
 
 class LoopFoundationTests(unittest.TestCase):
+    def test_init_creates_canonical_workspace_and_starter_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(main(["init", str(root), "--json"]), 0)
+
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["root"], str(root))
+            for relative in (
+                "outline",
+                "sources",
+                ".loop",
+                ".loop/sections",
+                ".loop/reviews",
+                ".loop/logs",
+                ".loop/tasks",
+                ".loop/agent-results",
+                "output",
+            ):
+                self.assertTrue((root / relative).is_dir(), relative)
+
+            assignment = root / "assignment.md"
+            links = root / "sources" / "links.md"
+            readme = root / "README.md"
+            self.assertTrue(assignment.is_file())
+            self.assertTrue(links.is_file())
+            self.assertTrue(readme.is_file())
+            self.assertIn("Describe the task to complete.", assignment.read_text(encoding="utf-8"))
+            self.assertIn("HTTP(S)", links.read_text(encoding="utf-8"))
+            self.assertIn("loop run .", readme.read_text(encoding="utf-8"))
+            self.assertTrue(result["created"])
+            self.assertFalse(result["existing"])
+
+    def test_init_is_idempotent_and_preserves_existing_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.assertEqual(main(["init", str(root)]), 0)
+            assignment = root / "assignment.md"
+            links = root / "sources" / "links.md"
+            readme = root / "README.md"
+            assignment.write_text("# My assignment\n", encoding="utf-8")
+            links.write_text("https://example.com/my-source\n", encoding="utf-8")
+            readme.write_text("# My notes\n", encoding="utf-8")
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(main(["init", str(root), "--json"]), 0)
+
+            result = json.loads(output.getvalue())
+            self.assertFalse(result["created"])
+            self.assertIn("assignment.md", result["existing"])
+            self.assertIn("sources/links.md", result["existing"])
+            self.assertIn("README.md", result["existing"])
+            self.assertEqual(assignment.read_text(encoding="utf-8"), "# My assignment\n")
+            self.assertEqual(links.read_text(encoding="utf-8"), "https://example.com/my-source\n")
+            self.assertEqual(readme.read_text(encoding="utf-8"), "# My notes\n")
+
     def test_graph_rejects_cycles(self) -> None:
         with self.assertRaises(GraphError):
             TaskGraph.from_dict(
