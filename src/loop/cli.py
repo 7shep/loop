@@ -28,6 +28,10 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--request", help="the user request to persist with this run")
     run.add_argument("--json", action="store_true", dest="as_json")
 
+    init = commands.add_parser("init", help="create a named assignment workspace")
+    init.add_argument("assignment_name", help="new assignment folder name")
+    init.add_argument("--json", action="store_true", dest="as_json")
+
     resume = commands.add_parser("resume", help="resume an interrupted or paused run")
     resume.add_argument("path", nargs="?", default=".")
     resume.add_argument("--runtime", choices=("conversation", "demo"))
@@ -87,6 +91,10 @@ def _print_result(result: object, as_json: bool = False) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.command == "init":
+            result = Workspace.initialize_named(args.assignment_name)
+            _print_result(result, args.as_json)
+            return 0
         if args.command == "agents":
             value = {name: role.to_dict() for name, role in role_definitions().items()}
             print(json.dumps(value, indent=2, ensure_ascii=False) if args.as_json else "\n".join(value))

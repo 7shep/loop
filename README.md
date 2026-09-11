@@ -28,6 +28,17 @@ conversation without switching threads. The packaged TOML definitions in
 
 ## Usage
 
+Initialize a new assignment workspace from the class or course directory:
+
+```bash
+loop init CISC335
+```
+
+This creates a `CISC335/` child directory with the canonical `assignment.md`,
+`outline/`, `sources/links.md`, `.loop/`, and `output/` layout, along with a
+starter `README.md` that explains the workflow. Existing files are preserved,
+so initializing the same assignment again is safe.
+
 Create an assignment directory with an `assignment.md`, an optional `outline/`
 directory, and a `sources/` directory containing the required `links.md` file.
 Optional source-folder files are historical grades or professor feedback in PDF,
