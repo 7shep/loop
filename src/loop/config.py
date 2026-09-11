@@ -55,6 +55,12 @@ class LoopConfig:
             raise ValueError("output must be 'markdown' or 'latex'")
         if self.runtime not in {"conversation", "demo"}:
             raise ValueError("runtime must be 'conversation' or 'demo'")
+        if self.limits.max_parallel_sections < 1 or self.limits.max_parallel_researchers < 1:
+            raise ValueError("parallelism limits must be at least 1")
+        if any(value < 0 for value in asdict(self.limits).values()):
+            raise ValueError("retry and concurrency limits cannot be negative")
+        if any(config.timeout_seconds < 1 for config in self.models.values()):
+            raise ValueError("agent timeouts must be positive")
         if not self.models:
             self.models = {
                 role: AgentConfig(**values) for role, values in DEFAULT_MODELS.items()

@@ -1,6 +1,7 @@
 [build-system]
 requires = []
-build-backend = "setuptools.build_meta:__legacy__"
+build-backend = "build_backend"
+backend-path = ["."]
 
 [project]
 name = "loop-assignment-orchestrator"
@@ -14,6 +15,3 @@ dependencies = []
 
 [project.scripts]
 loop = "loop.cli:main"
-
-[tool.setuptools.packages.find]
-where = ["src"]

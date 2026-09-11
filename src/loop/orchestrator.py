@@ -14,7 +14,7 @@ from .config import LoopConfig, load_config
 from .document import assemble_latex, assemble_markdown
 from .events import EventLog
 from .graph import TaskGraph
-from .models import RunPhase, RunState, RunStatus, SectionState, SectionStatus
+from .models import RunPhase, RunState, RunStatus, SectionState, SectionStatus, utc_now
 from .schemas import (
     SchemaError,
     validate_global_plan,
@@ -166,7 +166,7 @@ class LoopOrchestrator:
     def _load_or_initialize(self, require_existing: bool = False) -> None:
         if self.store.exists(".loop/state.json"):
             self.state = load_state(self.store)
-            self.config = LoopConfig.from_dict(self.state.config) if hasattr(LoopConfig, "from_dict") else self.config
+            self.config = LoopConfig.from_dict(self.state.config)
             self.events = EventLog(self.store, self.state.run_id, self.reporter)
             return
         if require_existing:
@@ -422,7 +422,7 @@ class LoopOrchestrator:
             self.store.write_text(final_ref, self.store.read_text(draft_ref))
             self.state.status = RunStatus.COMPLETED.value
             self.state.current_phase = RunPhase.COMPLETE.value
-            self.state.completed_at = self.state.updated_at
+            self.state.completed_at = utc_now()
             self.state.termination_reason = "global review passed"
             save_state(self.store, self.state)
             self.events.emit("RUN_COMPLETED", output=final_ref, word_count=count)
