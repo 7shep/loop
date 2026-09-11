@@ -170,7 +170,10 @@ class DemoAgentRuntime(AgentRuntime):
                 evidence_id = f"{source['id']}-E{len(evidence) + 1:02d}"
                 source_text = ""
                 if source.get("path") and store.exists(source["path"]):
-                    source_text = re.sub(r"\s+", " ", store.read_text(source["path"])).strip()
+                    try:
+                        source_text = re.sub(r"\s+", " ", store.read_text(source["path"])).strip()
+                    except UnicodeDecodeError:
+                        source_text = ""
                 paraphrase = (source_text[:240] if source_text else f"Evidence relevant to {claim['statement']}")
                 evidence.append(
                     {

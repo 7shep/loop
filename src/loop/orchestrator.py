@@ -6,7 +6,6 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from .agents.conversation import ConversationAgentRuntime
 from .agents.contracts import AgentResult, AgentRuntime, AgentTask, role_definitions
 from .agents.demo import DemoAgentRuntime
 from .artifacts.store import ArtifactStore
@@ -25,6 +24,7 @@ from .schemas import (
     validate_writing_review,
 )
 from .state import create_state, load_state, save_state, section_counts, set_run_phase
+from .runtime.codex_runtime import CodexConversationRuntime
 from .workspace import Workspace
 
 
@@ -61,7 +61,7 @@ class LoopOrchestrator:
         self.store = ArtifactStore(workspace)
         self.config = config or load_config(workspace.root)
         self.runtime = runtime or (
-            DemoAgentRuntime() if self.config.runtime == "demo" else ConversationAgentRuntime()
+            DemoAgentRuntime() if self.config.runtime == "demo" else CodexConversationRuntime()
         )
         self.reporter = reporter
         self.state: RunState | None = None
@@ -92,6 +92,8 @@ class LoopOrchestrator:
                     break
                 if not self.state.sections:
                     self._create_global_plan()
+                    if not self.state.sections:
+                        continue
                 unfinished = [
                     section for section in self.state.sections.values() if section.status != SectionStatus.COMMITTED.value
                 ]
@@ -158,6 +160,7 @@ class LoopOrchestrator:
             "output_dir": self.state.output_dir,
             "sections": section_counts(self.state),
             "global_review_cycle": self.state.global_review_cycle,
+            "agent_failures": self.state.agent_failures,
             "waiting_for_task": self.state.waiting_for_task,
             "last_error": self.state.last_error,
             "termination_reason": self.state.termination_reason,
@@ -205,7 +208,17 @@ class LoopOrchestrator:
             output_kind="json",
             instructions="Create a validated global section/dependency plan from the assignment artifacts.",
         )
-        value = self._invoke(task)
+        try:
+            value = self._invoke(task)
+        except AgentExecutionError as exc:
+            self.state.agent_failures += 1
+            self.state.last_error = str(exc)
+            if self.state.agent_failures > self.config.limits.max_agent_failures:
+                self._fail_run("global planning agent failure limit reached")
+            else:
+                save_state(self.store, self.state)
+                self.events.emit("AGENT_RETRY_SCHEDULED", role="orchestrator", attempt=self.state.agent_failures)
+            return
         plan = validate_global_plan(value)
         self.store.write_json(".loop/global-plan.json", plan)
         graph = TaskGraph.from_global_plan(plan)
@@ -404,17 +417,27 @@ class LoopOrchestrator:
         set_run_phase(self.state, RunPhase.GLOBAL_REVIEW)
         save_state(self.store, self.state)
         self.events.emit("GLOBAL_REVIEW_STARTED", cycle=self.state.global_review_cycle)
-        value = self._invoke(
-            self._task(
-                role="global_reviewer",
-                mode="global_review",
-                input_refs=[draft_ref, "assignment.md", ".loop/global-plan.json", ".loop/source-index.json"],
-                output_ref=".loop/reviews/global-review.json",
-                output_kind="json",
-                instructions="Audit the full assembled document and route any failures to affected section IDs.",
-                metadata={"section_ids": [section.id for section in sections]},
+        try:
+            value = self._invoke(
+                self._task(
+                    role="global_reviewer",
+                    mode="global_review",
+                    input_refs=[draft_ref, "assignment.md", ".loop/global-plan.json", ".loop/source-index.json"],
+                    output_ref=".loop/reviews/global-review.json",
+                    output_kind="json",
+                    instructions="Audit the full assembled document and route any failures to affected section IDs.",
+                    metadata={"section_ids": [section.id for section in sections]},
+                )
             )
-        )
+        except AgentExecutionError as exc:
+            self.state.agent_failures += 1
+            self.state.last_error = str(exc)
+            if self.state.agent_failures > self.config.limits.max_agent_failures:
+                self._fail_run("global review agent failure limit reached")
+                return False
+            save_state(self.store, self.state)
+            self.events.emit("AGENT_RETRY_SCHEDULED", role="global_reviewer", attempt=self.state.agent_failures)
+            return True
         review = validate_global_review(value)
         self.store.write_json(".loop/reviews/global-review.json", review)
         if review["decision"] == "PASS":
