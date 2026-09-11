@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Loop global review",
+  "type": "object",
+  "required": ["decision", "issues"],
+  "properties": {
+    "decision": {"enum": ["PASS", "REVISE"]},
+    "issues": {"type": "array", "items": {"type": "object", "required": ["type", "description", "sections"], "properties": {"type": {"type": "string"}, "description": {"type": "string"}, "sections": {"type": "array", "items": {"type": "string"}}}}}
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Loop persisted state",
+  "type": "object",
+  "required": ["schema_version", "run_id", "status", "current_phase", "workspace_root", "loop_dir", "output_dir", "sections", "graph"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "run_id": {"type": "string", "minLength": 1},
+    "status": {"enum": ["running", "paused", "failed", "cancelled", "completed"]},
+    "current_phase": {"type": "string"},
+    "workspace_root": {"type": "string"},
+    "loop_dir": {"type": "string"},
+    "output_dir": {"type": "string"},
+    "sections": {"type": "object"},
+    "graph": {"type": "object"}
+  }
+}

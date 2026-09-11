@@ -9,10 +9,35 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
 from loop.agents.demo import DemoAgentRuntime
+from loop.agents.conversation import ConversationAgentRuntime
+from loop.agents.contracts import AgentResult
 from loop.config import LoopConfig
 from loop.graph import GraphError, TaskGraph
 from loop.orchestrator import LoopOrchestrator
 from loop.workspace import Workspace, WorkspaceError
+
+
+class ReopenOnceRuntime(DemoAgentRuntime):
+    def __init__(self) -> None:
+        self.reopened = False
+
+    def run(self, task, store):
+        if task.role == "global_reviewer" and not self.reopened:
+            self.reopened = True
+            return AgentResult(
+                status="completed",
+                output={
+                    "decision": "REVISE",
+                    "issues": [
+                        {
+                            "type": "ARGUMENT_GAP",
+                            "sections": ["background"],
+                            "description": "Strengthen the opening section's link to the thesis.",
+                        }
+                    ],
+                },
+            )
+        return super().run(task, store)
 
 
 class LoopFoundationTests(unittest.TestCase):
@@ -62,6 +87,57 @@ class LoopFoundationTests(unittest.TestCase):
             )
             self.assertEqual(review["decision"], "PASS")
             self.assertIn("References", (root / "output" / "final.md").read_text(encoding="utf-8"))
+
+    def test_conversation_runtime_persists_a_resumable_task_handoff(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "assignment.md").write_text("Complete the assignment.", encoding="utf-8")
+            workspace = Workspace.discover(root)
+            orchestrator = LoopOrchestrator(
+                workspace, config=LoopConfig(runtime="conversation"), runtime=ConversationAgentRuntime()
+            )
+            first = orchestrator.run()
+            self.assertEqual(first.status, "paused")
+            task_id = json.loads((root / ".loop" / "state.json").read_text(encoding="utf-8"))["waiting_for_task"]
+            manifest_path = root / ".loop" / "tasks" / f"{task_id}.json"
+            (root / ".loop" / "global-plan.json").write_text(
+                json.dumps(
+                    {
+                        "summary": "A simple assignment",
+                        "sections": [
+                            {
+                                "id": "introduction",
+                                "title": "Introduction",
+                                "order": 0,
+                                "depends_on": [],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            ConversationAgentRuntime.complete_task(task_id, orchestrator.store)
+            resumed = orchestrator.run(resume=True)
+            self.assertEqual(resumed.status, "paused")
+            pending = list((root / ".loop" / "tasks").glob("*.json"))
+            self.assertTrue(any(json.loads(path.read_text(encoding="utf-8"))["role"] == "planner" for path in pending))
+
+    def test_global_review_reopens_only_affected_sections(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "assignment.md").write_text("Compare the two sections.", encoding="utf-8")
+            (root / "outline.md").write_text("# Background\n# Analysis\n", encoding="utf-8")
+            runtime = ReopenOnceRuntime()
+            orchestrator = LoopOrchestrator(
+                Workspace.discover(root), config=LoopConfig(runtime="demo"), runtime=runtime
+            )
+            result = orchestrator.run()
+
+            self.assertEqual(result.status, "completed", result.message)
+            state = json.loads((root / ".loop" / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(state["global_review_cycle"], 1)
+            self.assertEqual(state["sections"]["background"]["global_revision_count"], 1)
+            self.assertEqual(state["sections"]["analysis"]["global_revision_count"], 0)
 
 
 if __name__ == "__main__":

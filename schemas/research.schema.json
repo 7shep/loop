@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Loop research and evidence",
+  "type": "object",
+  "required": ["section_id", "claims", "evidence"],
+  "properties": {
+    "section_id": {"type": "string", "minLength": 1},
+    "claims": {"type": "array", "items": {"type": "object", "required": ["claim_id", "evidence"], "properties": {"claim_id": {"type": "string"}, "evidence": {"type": "array", "items": {"type": "string"}}}}},
+    "evidence": {"type": "array", "items": {"type": "object", "required": ["id", "source_id", "supports", "location", "paraphrase", "confidence"], "properties": {"id": {"type": "string"}, "source_id": {"type": "string"}, "supports": {"type": "array", "items": {"type": "string"}}, "location": {"type": "string"}, "paraphrase": {"type": "string"}, "confidence": {"type": "string"}}}}
+  }
+}

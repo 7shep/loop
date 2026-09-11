@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Loop section review",
+  "type": "object",
+  "required": ["decision"],
+  "properties": {
+    "decision": {"enum": ["APPROVE", "REVISE"]},
+    "score": {"type": "number", "minimum": 0, "maximum": 100},
+    "issues": {"type": "array"},
+    "missing_evidence": {"type": "array"},
+    "scope_issues": {"type": "array"},
+    "critical_issues": {"type": "array"},
+    "citation_issues": {"type": "array"},
+    "formatting_issues": {"type": "array"},
+    "argument_issues": {"type": "array"}
+  }
+}

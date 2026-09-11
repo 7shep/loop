@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from .agents.conversation import ConversationAgentRuntime
-from .agents.contracts import AgentResult, AgentRuntime, AgentTask
+from .agents.contracts import AgentResult, AgentRuntime, AgentTask, role_definitions
 from .agents.demo import DemoAgentRuntime
 from .artifacts.store import ArtifactStore
 from .config import LoopConfig, load_config
@@ -194,6 +194,9 @@ class LoopOrchestrator:
         refs = [manifest["assignment_file"]]
         if manifest.get("outline_file"):
             refs.append(manifest["outline_file"])
+        if manifest.get("rubric_file"):
+            refs.append(manifest["rubric_file"])
+        refs.append(".loop/source-index.json")
         task = self._task(
             role="orchestrator",
             mode="global_plan",
@@ -469,6 +472,7 @@ class LoopOrchestrator:
             revision_part = f"-g{self.state.global_review_cycle}"
         task_id = re.sub(r"[^a-zA-Z0-9_-]", "-", f"{self.state.run_id}-{role}-{mode}{section_part}{revision_part}")
         task_metadata = dict(metadata or {})
+        task_metadata["role_contract"] = role_definitions()[role].to_dict()
         if section:
             task_metadata["section"] = {
                 "id": section.id,
