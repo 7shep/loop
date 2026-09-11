@@ -524,7 +524,9 @@ class LoopOrchestrator:
             revision_part = f"-g{self.state.global_review_cycle}"
         task_id = re.sub(r"[^a-zA-Z0-9_-]", "-", f"{self.state.run_id}-{role}-{mode}{section_part}{revision_part}")
         task_metadata = dict(metadata or {})
-        task_metadata["role_contract"] = role_definitions()[role].to_dict()
+        role_contract = role_definitions()[role]
+        task_metadata["role_contract"] = role_contract.to_dict()
+        task_metadata["required_skills"] = list(role_contract.required_skills)
         task_metadata["outline_guidance"] = self._outline_guidance_metadata()
         task_metadata["source_guidance"] = self._source_guidance_metadata()
         if section:
@@ -545,10 +547,17 @@ class LoopOrchestrator:
             model=role_config.model,
             effort=role_config.effort,
             timeout_seconds=role_config.timeout_seconds,
-            instructions=(
-                f"{instructions}\n\n{self._outline_guidance_instructions()}\n\n"
-                f"{self._source_guidance_instructions(role)}"
+            instructions="\n\n".join(
+                block
+                for block in (
+                    instructions,
+                    self._required_skill_instructions(role),
+                    self._outline_guidance_instructions(),
+                    self._source_guidance_instructions(role),
+                )
+                if block
             ),
+            required_skills=role_contract.required_skills,
             metadata=task_metadata,
         )
 
@@ -738,6 +747,19 @@ class LoopOrchestrator:
                     "Web search is disabled by configuration; do not claim to have inspected linked pages you could not access."
                 )
         return "\n".join(lines)
+
+    def _required_skill_instructions(self, role: str) -> str:
+        required_skills = role_definitions()[role].required_skills
+        if "humanizer" not in required_skills:
+            return ""
+        return "\n".join(
+            [
+                "Required skill: humanizer.",
+                "After drafting the complete section, invoke `$humanizer` in embedded mode before writing the declared output artifact.",
+                "Use it as a prose editing pass: preserve every supported claim, required heading and format, and every registered citation marker such as [S01]. Do not add facts, sources, citations, or unsupported interpretation.",
+                "Write only the final humanized section text to the declared draft path. If the skill is unavailable, pause or report the concrete blocker instead of silently skipping the pass.",
+            ]
+        )
 
     def _outline_guidance_instructions(self) -> str:
         guidance = self._outline_guidance_metadata()

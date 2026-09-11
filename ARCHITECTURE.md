@@ -53,6 +53,9 @@ The central design rule is:
            Writer          Writer          Writer
              │             │             │
              ▼             ▼             ▼
+      Humanizer (writer) Humanizer (writer) Humanizer (writer)
+             │             │             │
+             ▼             ▼             ▼
           Reviewer       Reviewer       Reviewer
              │             │             │
              └─────────────┼─────────────┘
@@ -82,6 +85,11 @@ The central design rule is:
 ## 3. Runtime Layers
 
 Loop should be divided into four main layers.
+
+Reusable skills are execution policy applied inside an agent task. They do not
+become independent state-machine nodes or persisted artifacts unless a workflow
+explicitly requires one. The writer's required `humanizer` skill is therefore a
+substep between drafting and writing-review, inside the writer invocation.
 
 ```text
 ┌───────────────────────────────────────────────┐
@@ -392,6 +400,7 @@ PLAN_REVIEW
 RESEARCHING
    ↓
 WRITING
+   │ writer drafts, then invokes humanizer
    ↓
 WRITING_REVIEW
    ├── rejected ──→ WRITING
@@ -424,7 +433,7 @@ Top-Level Loop Session
 ├── Section-01 Planner Thread
 ├── Section-01 Reviewer Thread
 ├── Section-01 Research Thread
-├── Section-01 Writer Thread
+├── Section-01 Writer Thread (invokes humanizer)
 ├── Section-02 Planner Thread
 └── ...
 ```
@@ -475,12 +484,18 @@ Every agent invocation should have:
 ROLE
 INPUT SCHEMA
 OUTPUT SCHEMA
+REQUIRED SKILLS
 ALLOWED TOOLS
 WORKING DIRECTORY
 MODEL
 REASONING EFFORT
 TIMEOUT
 ```
+
+Role definitions declare any required skills, and the runtime copies that list
+onto every task manifest. The writer therefore carries
+`required_skills: ["humanizer"]` in both its role contract and its concrete task
+handoff, where the parent or native child can enforce the required invocation.
 
 Agents should not return arbitrary free-form responses when the runtime needs structured decisions.
 
@@ -583,6 +598,7 @@ Escalate to xHigh only for unusually difficult source interpretation.
 - style requirements
 - outline guidance and any applicable past-mark do/not-do checks
 - relevant approved prior sections where necessary
+- required `humanizer` skill
 
 ### Output
 
@@ -590,7 +606,17 @@ Escalate to xHigh only for unusually difficult source interpretation.
 draft.md
 ```
 
-The writer should not independently invent sources.
+The writer first drafts from the approved plan and evidence, then invokes
+`humanizer` in embedded mode on the complete draft before writing `draft.md`.
+The skill may change prose structure and wording to remove AI-sounding patterns,
+but it must preserve every supported claim, required heading and format, and
+the full set of registered `[S##]` citation markers. The writer verifies those
+invariants after the pass and returns only the final humanized text.
+
+The humanizer does not research, add sources, or replace the writing reviewer.
+If the required skill is unavailable, the writer pauses or reports a concrete
+blocker rather than silently producing an unprocessed draft. The writer should
+not independently invent sources.
 
 Recommended model:
 
@@ -718,6 +744,7 @@ A useful internal rule is:
 ```text
 WRITER MAY NOT INTRODUCE A NEW SOURCE.
 WRITER MAY ONLY CITE SOURCE IDs PRESENT IN THE REGISTRY.
+HUMANIZER MUST PRESERVE THE WRITER'S REGISTERED CITATION MARKERS.
 ```
 
 The output may temporarily use internal markers:
@@ -997,7 +1024,9 @@ write research/evidence artifacts
 ```text
 read approved plan
 read evidence
-write only section draft path
+invoke humanizer in embedded mode after drafting
+write only the final humanized section draft path
+preserve supported claims and [S##] markers
 ```
 
 ### Reviewer
@@ -1025,6 +1054,7 @@ assignment constraints
 + evidence for this section
 + relevant neighboring approved sections
 + citation/style rules
++ humanizer skill instructions
 ```
 
 This reduces token usage and context drift.
@@ -1120,6 +1150,10 @@ src/
 │   ├── reviewer.ts
 │   └── global-reviewer.ts
 │
+├── skills/
+│   ├── loop/SKILL.md
+│   └── humanizer/SKILL.md
+│
 ├── runtime/
 │   ├── agent-runtime.ts
 │   └── codex-runtime.ts
@@ -1154,14 +1188,16 @@ The architecture should preserve these invariants:
 4. Agents communicate primarily through persisted artifacts.
 5. Research precedes writing.
 6. Writers only cite registered sources.
-7. Reviewers judge but do not mutate accepted output.
-8. Only the orchestrator/runtime commits approved sections.
-9. Sections may run concurrently when dependencies allow.
-10. Every loop is bounded.
-11. Global review occurs after assembly.
-12. Global revisions reopen only affected sections.
-13. Final output is generated deterministically from approved content.
-14. The entire run can be paused, inspected, resumed, or cancelled from one control surface.
+7. Writers invoke the required humanizer skill before writing-review.
+8. Humanizer preserves supported claims, required format, and citation markers.
+9. Reviewers judge but do not mutate accepted output.
+10. Only the orchestrator/runtime commits approved sections.
+11. Sections may run concurrently when dependencies allow.
+12. Every loop is bounded.
+13. Global review occurs after assembly.
+14. Global revisions reopen only affected sections.
+15. Final output is generated deterministically from approved content.
+16. The entire run can be paused, inspected, resumed, or cancelled from one control surface.
 
 ---
 
