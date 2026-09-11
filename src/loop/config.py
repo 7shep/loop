@@ -46,7 +46,7 @@ class LoopConfig:
     output: str = "markdown"
     citation_style: str = "APA"
     runtime: str = "conversation"
-    # Sources are supplied as URLs in sources/links.md, so native researchers
+    # When source links are supplied in sources/links.md, native researchers
     # need web access by default to inspect and verify the relevant links.
     external_research: bool = True
     models: dict[str, AgentConfig] = field(default_factory=dict)

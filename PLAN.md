@@ -18,8 +18,8 @@ The user provides an assignment prompt, outline, rubric, source links, historica
 
 Assignment guidance is grouped under an optional `outline/` directory. The
 directory may contain an assignment outline and one or more rubrics. Historical
-grades or professor feedback belong in `sources/` alongside the required
-`links.md`; those optional files may be PDF, DOCX, or text. File names under
+grades or professor feedback belong in `sources/` alongside the optional
+`links.md`; those files may be PDF, DOCX, or text. File names under
 `outline/` are not part of the contract, and PDFs are valid guidance inputs.
 Loop indexes every outline file and classifies likely rubric and legacy history
 files for agent routing. When historical feedback is available, planning,
@@ -166,8 +166,8 @@ Loop-managed files should live under a hidden local directory:
 
 The generated outline index records every file under `outline/`, including PDF
 inputs and categorized past-mark or professor-feedback references. The source
-manifest requires `sources/links.md`, extracts its HTTP(S) links into the source
-registry, and passes optional PDF, DOCX, or text files in `sources/` as historical
+manifest optionally reads `sources/links.md`, extracts its HTTP(S) links into the source
+registry when present, and passes optional PDF, DOCX, or text files in `sources/` as historical
 grade guidance rather than citable sources.
 
 ```text

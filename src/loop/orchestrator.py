@@ -715,26 +715,47 @@ class LoopOrchestrator:
 
     def _source_guidance_instructions(self, role: str) -> str:
         guidance = self._source_guidance_metadata()
-        links_file = guidance.get("links_file") or "sources/links.md"
+        links_file = guidance.get("links_file")
         feedback_files = guidance.get("feedback_files") or []
+        source_index = self.store.read_json(".loop/source-index.json") if self.store.exists(".loop/source-index.json") else {}
+        registered_sources = source_index.get("sources", []) if isinstance(source_index, dict) else []
+        has_sources = bool(registered_sources)
         lines = [
             "Source inputs:",
-            f"Read {links_file}; it is the required allowlist of outside sources for this assignment.",
-            "The citable S## records in .loop/source-index.json correspond to the HTTP(S) links in that file.",
-            "Optional files under sources/ are past-grade or professor-feedback records, not citation sources.",
-            "Never cite a feedback artifact or introduce a source that is not represented in links.md.",
         ]
+        if links_file and has_sources:
+            lines.extend(
+                [
+                    f"Read {links_file}; it is the allowlist of outside sources for this assignment.",
+                    "The citable S## records in .loop/source-index.json correspond to the HTTP(S) links in that file.",
+                    "Never cite a feedback artifact or introduce a source that is not represented in links.md.",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    (
+                        f"{links_file} contains no HTTP(S) source links."
+                        if links_file
+                        else "No external source links were supplied for this assignment."
+                    ),
+                    "No citation sources are registered; do not invent sources or citation markers.",
+                ]
+            )
+        lines.append("Optional files under sources/ are past-grade or professor-feedback records, not citation sources.")
         if feedback_files:
             lines.append("Read every listed source feedback artifact when relevant: " + ", ".join(feedback_files) + ".")
             lines.append(
                 "Extract only supported reasons marks were lost and turn them into concrete do/not-do checks; do not copy prior work."
             )
-        if guidance.get("web_search_enabled") and role != "researcher":
+        if guidance.get("web_search_enabled") and role != "researcher" and has_sources:
             lines.append(
                 "Web search access is available to native subagents for inspecting the allowlisted links; use the research artifact as the citation and evidence authority."
             )
         if role == "researcher":
-            if guidance.get("web_search_enabled"):
+            if not has_sources:
+                lines.append("No source links are available, so do not perform web research or add citations.")
+            elif guidance.get("web_search_enabled"):
                 lines.extend(
                     [
                         "Web search is enabled for this research task.",
