@@ -12,6 +12,21 @@ reviewed Markdown or LaTeX deliverable. The current directory is the assignment
 root. Do not inspect parent folders, sibling assignments, or unrelated projects
 unless the user explicitly names a path.
 
+## Create an assignment workspace
+
+From a class or course directory, create a named assignment workspace with:
+
+```bash
+loop init CISC335
+```
+
+This creates the `CISC335/` child directory and its canonical assignment,
+outline, source, runtime, and output layout. Fill in `CISC335/assignment.md`,
+add guidance under `CISC335/outline/`, and add citation links to
+`CISC335/sources/links.md` before starting the workflow. Running the command
+again for the same assignment preserves existing files and only restores
+missing starter files or folders.
+
 ## Assignment guidance inputs
 
 `assignment.md` and `sources/links.md` are required. Assignment guidance belongs

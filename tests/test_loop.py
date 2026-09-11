@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -53,10 +54,16 @@ def add_required_sources(root: Path, links: str = "[Example source](https://exam
 class LoopFoundationTests(unittest.TestCase):
     def test_init_creates_canonical_workspace_and_starter_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
+            class_root = Path(temp)
+            root = class_root / "CISC335"
             output = io.StringIO()
-            with redirect_stdout(output):
-                self.assertEqual(main(["init", str(root), "--json"]), 0)
+            previous_cwd = Path.cwd()
+            try:
+                os.chdir(class_root)
+                with redirect_stdout(output):
+                    self.assertEqual(main(["init", "CISC335", "--json"]), 0)
+            finally:
+                os.chdir(previous_cwd)
 
             result = json.loads(output.getvalue())
             self.assertEqual(result["root"], str(root))
@@ -87,8 +94,14 @@ class LoopFoundationTests(unittest.TestCase):
 
     def test_init_is_idempotent_and_preserves_existing_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            self.assertEqual(main(["init", str(root)]), 0)
+            class_root = Path(temp)
+            root = class_root / "CISC335"
+            previous_cwd = Path.cwd()
+            try:
+                os.chdir(class_root)
+                self.assertEqual(main(["init", "CISC335"]), 0)
+            finally:
+                os.chdir(previous_cwd)
             assignment = root / "assignment.md"
             links = root / "sources" / "links.md"
             readme = root / "README.md"
@@ -97,8 +110,12 @@ class LoopFoundationTests(unittest.TestCase):
             readme.write_text("# My notes\n", encoding="utf-8")
 
             output = io.StringIO()
-            with redirect_stdout(output):
-                self.assertEqual(main(["init", str(root), "--json"]), 0)
+            try:
+                os.chdir(class_root)
+                with redirect_stdout(output):
+                    self.assertEqual(main(["init", "CISC335", "--json"]), 0)
+            finally:
+                os.chdir(previous_cwd)
 
             result = json.loads(output.getvalue())
             self.assertFalse(result["created"])
@@ -108,6 +125,17 @@ class LoopFoundationTests(unittest.TestCase):
             self.assertEqual(assignment.read_text(encoding="utf-8"), "# My assignment\n")
             self.assertEqual(links.read_text(encoding="utf-8"), "https://example.com/my-source\n")
             self.assertEqual(readme.read_text(encoding="utf-8"), "# My notes\n")
+
+    def test_init_rejects_a_path_as_the_assignment_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            class_root = Path(temp)
+            previous_cwd = Path.cwd()
+            try:
+                os.chdir(class_root)
+                self.assertEqual(main(["init", "nested/CISC335"]), 2)
+            finally:
+                os.chdir(previous_cwd)
+            self.assertFalse((class_root / "nested").exists())
 
     def test_graph_rejects_cycles(self) -> None:
         with self.assertRaises(GraphError):
