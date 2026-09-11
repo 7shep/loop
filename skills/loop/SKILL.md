@@ -12,6 +12,35 @@ reviewed Markdown or LaTeX deliverable. The current directory is the assignment
 root. Do not inspect parent folders, sibling assignments, or unrelated projects
 unless the user explicitly names a path.
 
+## Assignment guidance inputs
+
+`assignment.md` is required. Optional assignment guidance belongs in an
+`outline/` directory; it is a collection, not a single required filename. Every
+file below that directory is indexed and passed to the relevant agents, including
+PDFs, Markdown, text, and nested files. Names such as these are recommended but
+not required:
+
+```text
+outline/
+├── assignment-outline.pdf   # or .md/.txt
+├── rubric.pdf               # optional
+├── past-marks.pdf           # optional
+└── professor-feedback.md    # optional
+```
+
+Loop classifies likely rubric and past-mark/feedback files in
+`.loop/outline-index.json`, while still passing every `outline/` artifact to the
+agents so an unusual filename is not silently ignored. Root-level
+`outline.md`/`rubric.*` inputs remain a compatibility path for older assignment
+folders.
+
+When past marks or professor feedback are present, every planning, research,
+writing, and review task must read them and extract supported recurring reasons
+marks were lost. Convert those reasons into concrete do/not-do checks and apply
+them alongside the current assignment outline and rubric. Historical feedback is
+guidance, not a replacement for current requirements: never invent prior issues,
+copy old assignment content, or let an old rubric override the current one.
+
 ## Native subagent execution
 
 This is the primary path. The visible Loop conversation is the orchestrator;
@@ -23,7 +52,8 @@ user to switch threads.
    `loop run . --runtime conversation --request "<request>"`. The command
    initializes `.loop/` and emits the next structured task manifest.
 2. Read the pending manifest under `.loop/tasks/`. It names the role, model and
-   reasoning effort, artifact inputs, output path, and role contract.
+   reasoning effort, artifact inputs (including `.loop/outline-index.json` and
+   relevant `outline/` files), output path, and role contract.
 3. Spawn a native subagent for that task using the matching custom agent from
    `agents/` (`loop_planner`, `loop_researcher`, `loop_writer`,
    `loop_reviewer`, or `loop_global_reviewer`) when those definitions have been
@@ -63,6 +93,11 @@ but does not provide separate child-agent activity.
 - Writer: use only registered evidence and internal citation markers such as
   `[S01]`; do not introduce a new source.
 - Global reviewer: return `PASS` or structured issues with affected section IDs.
+
+All roles must use the indexed outline artifacts as assignment constraints. When
+past-mark or professor-feedback artifacts exist, they must carry the extracted
+do/not-do checks into their own output or review criteria without treating those
+historical records as current requirements.
 
 If a source is unavailable or the task cannot be completed safely, preserve the
 latest artifacts, leave the run paused or failed according to the runtime state,

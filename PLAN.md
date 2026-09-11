@@ -16,6 +16,15 @@ Desktop/
 
 The user provides an assignment prompt, outline, rubric, constraints, source files, and output requirements from that folder. Loop decomposes the work, runs section-level agent workflows, validates intermediate outputs, assembles the final artifact, and performs a whole-document review before completion.
 
+Assignment guidance is grouped under an optional `outline/` directory. The
+directory may contain an assignment outline, one or more rubrics, and optional
+past marks or professor feedback. File names are not part of the contract, and
+PDFs are valid guidance inputs. Loop indexes every file there and classifies
+likely rubric and history files for agent routing. When historical feedback is
+available, planning, writing, and review agents extract supported reasons marks
+were lost and turn them into concrete do/not-do checks; current assignment
+requirements remain authoritative.
+
 The intended interaction is simple:
 
 ```bash
@@ -65,8 +74,10 @@ Desktop/
     ├── CISC321/
     │   ├── Assignment 1/
     │   │   ├── assignment.md
-    │   │   ├── outline.md
-    │   │   ├── rubric.pdf
+    │   │   ├── outline/
+    │   │   │   ├── assignment-outline.pdf
+    │   │   │   ├── rubric.pdf
+    │   │   │   └── past-marks.md
     │   │   ├── sources/
     │   │   │   ├── source-01.pdf
     │   │   │   └── source-02.pdf
@@ -85,8 +96,10 @@ An assignment folder may contain:
 ```text
 Assignment 1/
 ├── assignment.md
-├── outline.md
-├── rubric.md
+├── outline/
+│   ├── assignment-outline.pdf
+│   ├── rubric.pdf
+│   └── past-marks.md
 ├── sources/
 │   ├── source-01.pdf
 │   ├── source-02.md
@@ -149,11 +162,16 @@ Rules:
 
 Loop-managed files should live under a hidden local directory:
 
+The generated outline index records every file under `outline/`, including PDF
+inputs and categorized past-mark or professor-feedback references.
+
 ```text
 Assignment 1/
 ├── assignment.md
-├── outline.md
-├── rubric.pdf
+├── outline/
+│   ├── assignment-outline.pdf
+│   ├── rubric.pdf
+│   └── past-marks.md
 ├── sources/
 ├── .loop/
 │   ├── state.json
@@ -422,8 +440,10 @@ Suggested runtime structure:
 ```text
 project/
 ├── assignment.md
-├── outline.md
-├── rubric.md
+├── outline/
+│   ├── assignment-outline.pdf
+│   ├── rubric.pdf
+│   └── past-marks.md
 ├── sources/
 │
 ├── .loop/

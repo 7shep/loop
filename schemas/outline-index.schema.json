@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Loop assignment outline index",
+  "type": "object",
+  "required": [
+    "outline_dir",
+    "outline_files",
+    "assignment_outline_files",
+    "rubric_files",
+    "past_marks_files",
+    "other_guidance_files",
+    "legacy_files",
+    "past_mark_guidance"
+  ],
+  "properties": {
+    "outline_dir": {"type": ["string", "null"]},
+    "outline_files": {"type": "array", "items": {"type": "string"}},
+    "assignment_outline_files": {"type": "array", "items": {"type": "string"}},
+    "rubric_files": {"type": "array", "items": {"type": "string"}},
+    "past_marks_files": {"type": "array", "items": {"type": "string"}},
+    "other_guidance_files": {"type": "array", "items": {"type": "string"}},
+    "legacy_files": {"type": "array", "items": {"type": "string"}},
+    "past_mark_guidance": {
+      "type": "object",
+      "required": ["purpose", "must_do", "must_not_do"],
+      "properties": {
+        "purpose": {"type": "string"},
+        "must_do": {"type": "array", "items": {"type": "string"}},
+        "must_not_do": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

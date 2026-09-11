@@ -59,13 +59,94 @@ class LoopFoundationTests(unittest.TestCase):
             with self.assertRaises(WorkspaceError):
                 workspace.inside(Path(temp).parent)
 
+    def test_outline_folder_indexes_pdf_and_history_without_fixed_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "assignment.md").write_text("Complete the assignment.", encoding="utf-8")
+            outline = root / "outline"
+            outline.mkdir()
+            (outline / "brief.pdf").write_bytes(b"%PDF-1.4\n")
+            (outline / "grading-criteria.pdf").write_bytes(b"%PDF-1.4\n")
+            (outline / "prior-feedback.pdf").write_bytes(b"%PDF-1.4\n")
+            (outline / "rubric-feedback.pdf").write_bytes(b"%PDF-1.4\n")
+            (outline / "class-notes.txt").write_text("Additional guidance.", encoding="utf-8")
+
+            manifest = Workspace.discover(root).input_manifest()
+
+            self.assertEqual(
+                manifest["outline_files"],
+                [
+                    "outline/brief.pdf",
+                    "outline/class-notes.txt",
+                    "outline/grading-criteria.pdf",
+                    "outline/prior-feedback.pdf",
+                    "outline/rubric-feedback.pdf",
+                ],
+            )
+            self.assertEqual(manifest["assignment_outline_files"], ["outline/brief.pdf"])
+            self.assertEqual(
+                manifest["rubric_files"],
+                ["outline/grading-criteria.pdf", "outline/rubric-feedback.pdf"],
+            )
+            self.assertEqual(
+                manifest["past_marks_files"],
+                ["outline/prior-feedback.pdf", "outline/rubric-feedback.pdf"],
+            )
+            self.assertEqual(manifest["other_guidance_files"], ["outline/class-notes.txt"])
+
+    def test_legacy_root_outline_inputs_remain_supported(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "assignment.md").write_text("Complete the assignment.", encoding="utf-8")
+            (root / "outline.md").write_text("# Introduction", encoding="utf-8")
+            (root / "rubric.pdf").write_bytes(b"%PDF-1.4\n")
+
+            manifest = Workspace.discover(root).input_manifest()
+
+            self.assertEqual(manifest["outline_files"], ["outline.md", "rubric.pdf"])
+            self.assertEqual(manifest["outline_file"], "outline.md")
+            self.assertEqual(manifest["rubric_file"], "rubric.pdf")
+            self.assertEqual(manifest["legacy_outline_files"], ["outline.md", "rubric.pdf"])
+
+    def test_conversation_task_contains_outline_and_past_mark_guidance(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "assignment.md").write_text("Complete the assignment.", encoding="utf-8")
+            outline = root / "outline"
+            outline.mkdir()
+            (outline / "assignment-brief.pdf").write_bytes(b"%PDF-1.4\n")
+            (outline / "lost-marks.md").write_text(
+                "Past feedback: insufficient evidence.", encoding="utf-8"
+            )
+
+            orchestrator = LoopOrchestrator(
+                Workspace.discover(root),
+                config=LoopConfig(runtime="conversation"),
+                runtime=ConversationAgentRuntime(),
+            )
+            result = orchestrator.run()
+            self.assertEqual(result.status, "paused")
+
+            state = json.loads((root / ".loop" / "state.json").read_text(encoding="utf-8"))
+            task_id = state["waiting_for_task"]
+            task = json.loads(
+                (root / ".loop" / "tasks" / f"{task_id}.json").read_text(encoding="utf-8")
+            )
+            self.assertIn("outline/assignment-brief.pdf", task["input_refs"])
+            self.assertIn("outline/lost-marks.md", task["input_refs"])
+            self.assertIn("past-mark", task["instructions"])
+            self.assertIn("do/not-do", task["instructions"])
+            self.assertEqual(task["metadata"]["outline_guidance"]["past_marks_files"], ["outline/lost-marks.md"])
+            self.assertTrue((root / ".loop" / "outline-index.json").exists())
+
     def test_demo_runtime_completes_full_review_gated_run(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "assignment.md").write_text(
                 "Explain the significance of the supplied evidence.", encoding="utf-8"
             )
-            (root / "outline.md").write_text(
+            (root / "outline").mkdir()
+            (root / "outline" / "assignment-outline.md").write_text(
                 "# Background\n# Analysis\n# Conclusion\n", encoding="utf-8"
             )
             (root / "sources").mkdir()
@@ -134,7 +215,10 @@ class LoopFoundationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "assignment.md").write_text("Compare the two sections.", encoding="utf-8")
-            (root / "outline.md").write_text("# Background\n# Analysis\n", encoding="utf-8")
+            (root / "outline").mkdir()
+            (root / "outline" / "assignment-outline.md").write_text(
+                "# Background\n# Analysis\n", encoding="utf-8"
+            )
             runtime = ReopenOnceRuntime()
             orchestrator = LoopOrchestrator(
                 Workspace.discover(root), config=LoopConfig(runtime="demo"), runtime=runtime

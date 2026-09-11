@@ -59,6 +59,81 @@ class Workspace:
         candidate = self.inside(name)
         return candidate if candidate.is_file() else None
 
+    def outline_index(self) -> dict[str, Any]:
+        """Return references for assignment guidance stored under ``outline/``.
+
+        Outline materials are intentionally reference-only. This lets native
+        Codex/Work agents inspect Markdown, text, PDF, or other permitted files
+        with the tools available in their host environment without making the
+        local orchestrator depend on a particular document parser.
+        """
+
+        outline_root = self.inside("outline")
+        paths: list[Path] = []
+        if outline_root.is_dir():
+            paths.extend(path for path in outline_root.rglob("*") if path.is_file())
+
+        # Keep existing assignment folders usable while the outline/ folder is
+        # adopted. These are compatibility inputs, not the canonical layout.
+        for name in ("outline.md", "outline.pdf", "outline.txt", "rubric.md", "rubric.pdf", "rubric.txt"):
+            candidate = self.find_input(name)
+            if candidate is not None:
+                paths.append(candidate)
+
+        unique_paths: list[Path] = []
+        seen: set[Path] = set()
+        for path in sorted(paths, key=lambda item: self.relative(item)):
+            resolved = path.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                unique_paths.append(resolved)
+
+        groups: dict[str, Any] = {
+            "outline_files": [],
+            "assignment_outline_files": [],
+            "rubric_files": [],
+            "past_marks_files": [],
+            "other_guidance_files": [],
+            "legacy_files": [],
+        }
+        for path in unique_paths:
+            relative = self.relative(path)
+            groups["outline_files"].append(relative)
+            if path.parent == self.root:
+                groups["legacy_files"].append(relative)
+            for category in self._outline_categories(path.stem):
+                groups[category].append(relative)
+
+        groups["outline_dir"] = "outline" if outline_root.is_dir() else None
+        groups["past_mark_guidance"] = {
+            "purpose": "Use prior professor feedback and lost-mark records as preventive guidance.",
+            "must_do": [
+                "Read every listed past-mark or feedback artifact before planning or drafting.",
+                "Extract recurring, concrete reasons marks were lost and turn them into do/not-do checks.",
+                "Apply those checks in section plans, writing, and review decisions when they do not conflict with the current assignment.",
+            ],
+            "must_not_do": [
+                "Do not treat historical feedback as a replacement for the current assignment outline or rubric.",
+                "Do not invent past mistakes or assume an issue applies when the records do not support it.",
+                "Do not copy prior assignment content; use the records only to improve compliance and quality.",
+            ],
+        }
+        return groups
+
+    def _outline_categories(self, stem: str) -> list[str]:
+        normalized = re.sub(r"[^a-z0-9]+", "-", stem.lower())
+        categories: list[str] = []
+        if any(
+            token in normalized
+            for token in ("past", "previous", "feedback", "deduction", "lost", "comment", "professor")
+        ):
+            categories.append("past_marks_files")
+        if any(token in normalized for token in ("rubric", "grading", "marking", "criteria")):
+            categories.append("rubric_files")
+        if any(token in normalized for token in ("outline", "brief", "requirement", "instruction", "prompt", "assignment")):
+            categories.append("assignment_outline_files")
+        return categories or ["other_guidance_files"]
+
     def input_manifest(self) -> dict[str, Any]:
         """Return references only; content remains in the source workspace."""
 
@@ -67,11 +142,9 @@ class Workspace:
             raise WorkspaceError(
                 "assignment.md is required in the active assignment directory"
             )
-        outline = self.find_input("outline.md")
-        rubric = self.find_input("rubric.md")
-        if rubric is None:
-            rubric_pdf = self.find_input("rubric.pdf")
-            rubric = rubric_pdf
+        outline_index = self.outline_index()
+        assignment_outline_files = outline_index["assignment_outline_files"]
+        rubric_files = outline_index["rubric_files"]
 
         source_root = self.inside("sources")
         source_files: list[str] = []
@@ -82,8 +155,17 @@ class Workspace:
         return {
             "workspace_root": str(self.root),
             "assignment_file": self.relative(assignment),
-            "outline_file": self.relative(outline) if outline else None,
-            "rubric_file": self.relative(rubric) if rubric else None,
+            # Singular fields remain as a compatibility convenience for older
+            # consumers; the collection fields are authoritative.
+            "outline_file": assignment_outline_files[0] if assignment_outline_files else None,
+            "rubric_file": rubric_files[0] if rubric_files else None,
+            "outline_dir": outline_index["outline_dir"],
+            "outline_files": outline_index["outline_files"],
+            "assignment_outline_files": assignment_outline_files,
+            "rubric_files": rubric_files,
+            "past_marks_files": outline_index["past_marks_files"],
+            "other_guidance_files": outline_index["other_guidance_files"],
+            "legacy_outline_files": outline_index["legacy_files"],
             "source_files": source_files,
         }
 

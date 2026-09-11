@@ -147,14 +147,25 @@ Desktop/
     └── CISC321/
         └── Assignment 1/          ← workspace_root
             ├── assignment.md
-            ├── outline.md
-            ├── rubric.pdf
+            ├── outline/
+            │   ├── assignment-outline.pdf
+            │   ├── rubric.pdf
+            │   └── past-marks.md
             ├── sources/
             ├── .loop/
             └── output/
 ```
 
 The runtime resolves the path supplied to `loop run` and stores it as `workspace_root`.
+
+`assignment.md` is the required assignment prompt. Assignment guidance is an
+optional `outline/` directory containing any number of outline, rubric, PDF, or
+past-mark/professor-feedback files; no filename such as `rubric.pdf` is required.
+Loop indexes every file in that directory in `.loop/outline-index.json` and
+passes the references to the relevant roles. Historical feedback is converted
+by reasoning agents into supported do/not-do checks, while the current outline
+and rubric remain authoritative. Root-level `outline.md` and `rubric.*` remain
+supported as a compatibility path.
 
 ```ts
 interface Workspace {
@@ -193,12 +204,15 @@ unless explicitly requested.
 ```text
 Assignment 1/
 ├── assignment.md
-├── outline.md
-├── rubric.pdf
+├── outline/
+│   ├── assignment-outline.pdf
+│   ├── rubric.pdf
+│   └── past-marks.md
 ├── sources/
 │
 ├── .loop/
 │   ├── state.json
+│   ├── outline-index.json
 │   ├── global-plan.json
 │   ├── source-index.json
 │   ├── evidence.json
@@ -475,7 +489,13 @@ Agents should not return arbitrary free-form responses when the runtime needs st
   "global_constraints": {},
   "section": {},
   "related_sections": [],
-  "available_sources": []
+  "available_sources": [],
+  "outline_guidance": {
+    "files": [],
+    "past_marks_files": [],
+    "must_do": [],
+    "must_not_do": []
+  }
 }
 ```
 
@@ -516,6 +536,7 @@ GPT-5.6 Luna High
 - approved section plan
 - source registry
 - user-provided source files
+- outline guidance and any past-mark/professor-feedback artifacts
 - research permissions
 
 ### Output
@@ -552,6 +573,7 @@ Escalate to xHigh only for unusually difficult source interpretation.
 - verified evidence subset
 - citation rules
 - style requirements
+- outline guidance and any applicable past-mark do/not-do checks
 - relevant approved prior sections where necessary
 
 ### Output
@@ -581,6 +603,7 @@ Input:
 - section plan
 - assignment requirements
 - global plan
+- outline guidance, including applicable past-mark do/not-do checks
 
 Output:
 
@@ -599,6 +622,7 @@ Input:
 - approved plan
 - cited evidence
 - assignment constraints
+- outline guidance, including applicable past-mark do/not-do checks
 
 Output:
 

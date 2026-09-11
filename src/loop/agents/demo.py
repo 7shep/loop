@@ -87,8 +87,11 @@ class DemoAgentRuntime(AgentRuntime):
         assignment = self._read(store, task.input_refs[0])
         outline = ""
         for ref in task.input_refs[1:]:
-            if ref.endswith("outline.md") and store.exists(ref):
-                outline = self._read(store, ref)
+            if (ref.startswith("outline/") or ref in {"outline.md", "outline.txt"}) and store.exists(ref):
+                # Text outlines are useful to the deterministic smoke runtime.
+                # Binary PDFs remain valid inputs for native Codex/Work agents,
+                # which can inspect them with their document tools.
+                outline += "\n" + self._read(store, ref)
         titles = _heading_lines(outline)
         if not titles:
             titles = ["Introduction", "Analysis", "Conclusion"]

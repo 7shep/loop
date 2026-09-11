@@ -28,17 +28,31 @@ conversation without switching threads. The packaged TOML definitions in
 
 ## Usage
 
-Create an assignment directory with an `assignment.md`, plus optional
-`outline.md`, `rubric.md` or `rubric.pdf`, and a `sources/` directory:
+Create an assignment directory with an `assignment.md`, an optional `outline/`
+directory, and a `sources/` directory. PDFs are accepted in both `outline/` and
+`sources/`; the outline directory does not require a file named `rubric.pdf`:
 
 ```text
 Desktop/3rd Year/CISC321/Assignment 1/
 ├── assignment.md
-├── outline.md
-├── rubric.md
+├── outline/
+│   ├── assignment-outline.pdf  # .md/.txt also work; filename is not fixed
+│   ├── rubric.pdf               # optional
+│   ├── past-marks.pdf           # optional
+│   └── professor-feedback.md    # optional
 ├── sources/
 └── loop.config.json       # optional
 ```
+
+Loop indexes every file under `outline/`, including nested files and PDFs. It
+classifies likely rubrics and past-mark/professor-feedback files for visibility
+in `.loop/outline-index.json`, but passes all outline artifacts to the agents so
+unusual filenames are still available. Past marks are used as preventive
+guidance: agents extract supported reasons marks were lost and turn them into
+concrete do/not-do checks, while keeping the current assignment requirements and
+rubric authoritative. They must not invent historical issues or copy old work.
+Root-level `outline.md` and `rubric.*` remain supported for compatibility with
+older folders.
 
 From the active assignment folder, invoke the skill in the parent conversation:
 
@@ -117,12 +131,15 @@ It reads only beneath that directory and writes generated state only beneath
 ```text
 Assignment 1/
 ├── assignment.md                 # immutable user input
-├── outline.md                    # optional input
-├── rubric.md                     # optional input
+├── outline/                      # optional outline, rubric, and history inputs
+│   ├── assignment-outline.pdf    # PDF, Markdown, text, and nested files work
+│   ├── rubric.pdf                # optional
+│   └── past-marks.md             # optional professor feedback/history
 ├── sources/                      # source files, indexed as S01, S02, ...
 ├── .loop/
 │   ├── state.json                # resumable run state
 │   ├── assignment.json           # input references, not a transcript
+│   ├── outline-index.json        # categorized outline/history references
 │   ├── global-plan.json
 │   ├── task-graph.json
 │   ├── source-index.json
@@ -234,8 +251,10 @@ stream their activity itself.
 The initial scheduler exposes dependency-aware bounded batches but executes the
 batch serially so shared evidence updates remain deterministic. A provider can
 replace that runtime with bounded parallel workers without changing the state or
-artifact contracts. PDF/DOCX extraction, external search, richer citation
-styles, and a live GUI remain follow-on adapters rather than hidden assumptions.
+artifact contracts. PDF inputs are accepted and passed to native agents by
+reference; provider-specific PDF/DOCX text extraction for the deterministic
+local runtime, external search, richer citation styles, and a live GUI remain
+follow-on adapters rather than hidden assumptions.
 
 ## Verification
 

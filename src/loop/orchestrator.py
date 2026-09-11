@@ -174,6 +174,10 @@ class LoopOrchestrator:
             self.state = load_state(self.store)
             self.config = LoopConfig.from_dict(self.state.config)
             self.events = EventLog(self.store, self.state.run_id, self.reporter)
+            # Migrate runs created before outline/ was introduced without
+            # changing their existing state or accepted section artifacts.
+            if not self.store.exists(".loop/outline-index.json"):
+                self.store.write_json(".loop/outline-index.json", self.workspace.outline_index())
             return
         if require_existing:
             raise OrchestrationError("no Loop run exists in this assignment directory")
@@ -189,6 +193,7 @@ class LoopOrchestrator:
             self.store.write_text(".loop/request.md", self.request + "\n")
             manifest["user_request_file"] = ".loop/request.md"
         self.store.write_json(".loop/assignment.json", manifest)
+        self.store.write_json(".loop/outline-index.json", self.workspace.outline_index())
         self.store.write_json(".loop/source-index.json", {"sources": self.workspace.source_index()})
         self.store.write_json(".loop/evidence.json", {"evidence": []})
         save_state(self.store, self.state)
@@ -203,10 +208,7 @@ class LoopOrchestrator:
         refs = [manifest["assignment_file"]]
         if manifest.get("user_request_file"):
             refs.append(manifest["user_request_file"])
-        if manifest.get("outline_file"):
-            refs.append(manifest["outline_file"])
-        if manifest.get("rubric_file"):
-            refs.append(manifest["rubric_file"])
+        refs.extend(self._outline_refs(manifest))
         refs.append(".loop/source-index.json")
         task = self._task(
             role="orchestrator",
@@ -294,7 +296,9 @@ class LoopOrchestrator:
                             role="reviewer",
                             mode="plan_review",
                             section=section,
-                            input_refs=[self._section_ref(section, "plan.json"), ".loop/global-plan.json", "assignment.md"],
+                            input_refs=self._with_outline_refs(
+                                [self._section_ref(section, "plan.json"), ".loop/global-plan.json", "assignment.md"]
+                            ),
                             output_ref=self._section_ref(section, "plan-review.json"),
                             output_kind="json",
                             instructions="Critique the section plan and return APPROVE or REVISE with structured issues.",
@@ -320,7 +324,9 @@ class LoopOrchestrator:
                             role="researcher",
                             mode="research",
                             section=section,
-                            input_refs=[self._section_ref(section, "plan.json"), ".loop/source-index.json"],
+                            input_refs=self._with_outline_refs(
+                                [self._section_ref(section, "plan.json"), ".loop/source-index.json"]
+                            ),
                             output_ref=self._section_ref(section, "research.json"),
                             output_kind="json",
                             instructions="Gather traceable evidence for the approved claims; do not write final prose.",
@@ -339,11 +345,14 @@ class LoopOrchestrator:
                             role="writer",
                             mode="section_draft",
                             section=section,
-                            input_refs=[
-                                self._section_ref(section, "plan.json"),
-                                self._section_ref(section, "research.json"),
-                                ".loop/evidence.json",
-                            ],
+                            input_refs=self._with_outline_refs(
+                                [
+                                    self._section_ref(section, "plan.json"),
+                                    self._section_ref(section, "research.json"),
+                                    ".loop/evidence.json",
+                                    "assignment.md",
+                                ]
+                            ),
                             output_ref=self._section_ref(section, "draft.md"),
                             output_kind="text",
                             instructions="Write only this section using registered evidence and internal citation markers.",
@@ -360,13 +369,15 @@ class LoopOrchestrator:
                             role="reviewer",
                             mode="writing_review",
                             section=section,
-                            input_refs=[
-                                self._section_ref(section, "draft.md"),
-                                self._section_ref(section, "plan.json"),
-                                self._section_ref(section, "research.json"),
-                                ".loop/evidence.json",
-                                "assignment.md",
-                            ],
+                            input_refs=self._with_outline_refs(
+                                [
+                                    self._section_ref(section, "draft.md"),
+                                    self._section_ref(section, "plan.json"),
+                                    self._section_ref(section, "research.json"),
+                                    ".loop/evidence.json",
+                                    "assignment.md",
+                                ]
+                            ),
                             output_ref=self._section_ref(section, "writing-review.json"),
                             output_kind="json",
                             instructions="Evaluate the draft and return structured APPROVE or REVISE feedback.",
@@ -430,7 +441,9 @@ class LoopOrchestrator:
                 self._task(
                     role="global_reviewer",
                     mode="global_review",
-                    input_refs=[draft_ref, "assignment.md", ".loop/global-plan.json", ".loop/source-index.json"],
+                    input_refs=self._with_outline_refs(
+                        [draft_ref, "assignment.md", ".loop/global-plan.json", ".loop/source-index.json"]
+                    ),
                     output_ref=".loop/reviews/global-review.json",
                     output_kind="json",
                     instructions="Audit the full assembled document and route any failures to affected section IDs.",
@@ -504,6 +517,7 @@ class LoopOrchestrator:
         task_id = re.sub(r"[^a-zA-Z0-9_-]", "-", f"{self.state.run_id}-{role}-{mode}{section_part}{revision_part}")
         task_metadata = dict(metadata or {})
         task_metadata["role_contract"] = role_definitions()[role].to_dict()
+        task_metadata["outline_guidance"] = self._outline_guidance_metadata()
         if section:
             task_metadata["section"] = {
                 "id": section.id,
@@ -522,7 +536,7 @@ class LoopOrchestrator:
             model=role_config.model,
             effort=role_config.effort,
             timeout_seconds=role_config.timeout_seconds,
-            instructions=instructions,
+            instructions=f"{instructions}\n\n{self._outline_guidance_instructions()}",
             metadata=task_metadata,
         )
 
@@ -620,7 +634,62 @@ class LoopOrchestrator:
         if self.store.exists(".loop/request.md"):
             refs.append(".loop/request.md")
         refs.extend([".loop/global-plan.json", ".loop/source-index.json"])
-        return refs
+        return self._with_outline_refs(refs)
+
+    def _outline_refs(self, manifest: dict[str, Any] | None = None) -> list[str]:
+        """Return all assignment-outline references, including legacy inputs."""
+
+        if manifest is None:
+            manifest = self.store.read_json(".loop/assignment.json")
+        refs = [".loop/outline-index.json"] if self.store.exists(".loop/outline-index.json") else []
+        outline_files = manifest.get("outline_files")
+        if isinstance(outline_files, list) and outline_files:
+            refs.extend(str(item) for item in outline_files)
+        else:
+            # Older manifests only have singular compatibility fields.
+            for key in ("outline_file", "rubric_file"):
+                if manifest.get(key):
+                    refs.append(str(manifest[key]))
+        return list(dict.fromkeys(refs))
+
+    def _with_outline_refs(self, refs: list[str]) -> list[str]:
+        return list(dict.fromkeys([*refs, *self._outline_refs()]))
+
+    def _outline_guidance_metadata(self) -> dict[str, Any]:
+        if self.store.exists(".loop/outline-index.json"):
+            index = self.store.read_json(".loop/outline-index.json")
+            if isinstance(index, dict):
+                return {
+                    "outline_files": index.get("outline_files", []),
+                    "past_marks_files": index.get("past_marks_files", []),
+                    "past_mark_guidance": index.get("past_mark_guidance", {}),
+                }
+        return {"outline_files": [], "past_marks_files": [], "past_mark_guidance": {}}
+
+    def _outline_guidance_instructions(self) -> str:
+        guidance = self._outline_guidance_metadata()
+        outline_files = guidance["outline_files"]
+        past_marks_files = guidance["past_marks_files"]
+        lines = [
+            "Assignment outline guidance:",
+            "Read every listed artifact under outline/ (including PDF files) that is relevant to this role.",
+        ]
+        if outline_files:
+            lines.append(f"Available outline artifacts: {', '.join(outline_files)}.")
+        if past_marks_files:
+            lines.extend(
+                [
+                    "past-mark or professor-feedback artifacts: " + ", ".join(past_marks_files) + ".",
+                    "Extract supported recurring reasons marks were lost and convert them into concrete do/not-do checks for this task.",
+                    "Apply those checks alongside the current assignment requirements and rubric.",
+                    "Do not invent historical mistakes, replace current requirements with historical feedback, or copy prior assignment content.",
+                ]
+            )
+        else:
+            lines.append(
+                "If any listed artifact contains prior marks or professor feedback, treat it as historical guidance and apply the same do/not-do rules without inventing details."
+            )
+        return "\n".join(lines)
 
     def _graph_stage(self, section_id: str, status: str) -> None:
         mapping = {
