@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from threading import Lock
 import uuid
 from typing import Any, Callable
 
@@ -16,6 +17,7 @@ class EventLog:
         self.run_id = run_id
         self.reporter = reporter
         self.relative_path = ".loop/logs/events.jsonl"
+        self._lock = Lock()
 
     def emit(self, event_type: str, **data: Any) -> dict[str, Any]:
         event = {
@@ -25,12 +27,13 @@ class EventLog:
             "type": event_type,
             "data": data,
         }
-        path = self.store.path(self.relative_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
-        if self.reporter:
-            self.reporter(self.message(event_type, data))
+        with self._lock:
+            path = self.store.path(self.relative_path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+            if self.reporter:
+                self.reporter(self.message(event_type, data))
         return event
 
     @staticmethod

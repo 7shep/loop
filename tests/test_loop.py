@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -15,7 +16,7 @@ from loop.agents.demo import DemoAgentRuntime
 from loop.agents.conversation import ConversationAgentRuntime
 from loop.agents.contracts import AgentResult
 from loop.cli import main
-from loop.config import LoopConfig
+from loop.config import Limits, LoopConfig
 from loop.graph import GraphError, TaskGraph
 from loop.orchestrator import LoopOrchestrator
 from loop.workspace import Workspace, WorkspaceError
@@ -52,6 +53,18 @@ class PauseOnWriterRuntime(DemoAgentRuntime):
         if task.role == "writer":
             self.writer_task = task
             return AgentResult(status="waiting", error="inspect writer contract")
+        return super().run(task, store)
+
+
+class ParallelPlannerRuntime(DemoAgentRuntime):
+    def __init__(self, section_count: int) -> None:
+        self.planner_barrier = threading.Barrier(section_count)
+        self.planner_sections: list[str] = []
+
+    def run(self, task, store):
+        if task.role == "planner":
+            self.planner_sections.append(task.metadata["section"]["id"])
+            self.planner_barrier.wait(timeout=5)
         return super().run(task, store)
 
 
@@ -400,6 +413,33 @@ class LoopFoundationTests(unittest.TestCase):
             output = (root / "output" / "final.md").read_text(encoding="utf-8")
             self.assertNotIn("References", output)
 
+    def test_independent_sections_run_in_parallel(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "assignment.md").write_text("Complete the assignment.", encoding="utf-8")
+            (root / "outline").mkdir()
+            (root / "outline" / "assignment-outline.md").write_text(
+                "# Background\n# Analysis\n# Conclusion\n", encoding="utf-8"
+            )
+            add_sources(root)
+            runtime = ParallelPlannerRuntime(section_count=3)
+            orchestrator = LoopOrchestrator(
+                Workspace.discover(root),
+                config=LoopConfig(
+                    runtime="demo",
+                    limits=Limits(max_parallel_sections=3),
+                ),
+                runtime=runtime,
+            )
+
+            result = orchestrator.run()
+
+            self.assertEqual(result.status, "completed", result.message)
+            self.assertEqual(
+                set(runtime.planner_sections),
+                {"background", "analysis", "conclusion"},
+            )
+
     def test_conversation_runtime_persists_a_resumable_task_handoff(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -437,6 +477,56 @@ class LoopFoundationTests(unittest.TestCase):
             self.assertEqual(resumed.status, "paused")
             pending = list((root / ".loop" / "tasks").glob("*.json"))
             self.assertTrue(any(json.loads(path.read_text(encoding="utf-8"))["role"] == "planner" for path in pending))
+
+    def test_conversation_runtime_queues_independent_section_tasks(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "assignment.md").write_text("Complete the assignment.", encoding="utf-8")
+            (root / "outline").mkdir()
+            (root / "outline" / "assignment-outline.md").write_text(
+                "# Background\n# Analysis\n# Conclusion\n", encoding="utf-8"
+            )
+            add_sources(root)
+            orchestrator = LoopOrchestrator(
+                Workspace.discover(root),
+                config=LoopConfig(
+                    runtime="conversation",
+                    limits=Limits(max_parallel_sections=3),
+                ),
+                runtime=ConversationAgentRuntime(),
+            )
+
+            first = orchestrator.run()
+            self.assertEqual(first.status, "paused")
+            global_task_id = json.loads(
+                (root / ".loop" / "state.json").read_text(encoding="utf-8")
+            )["waiting_for_task"]
+            (root / ".loop" / "global-plan.json").write_text(
+                json.dumps(
+                    {
+                        "summary": "A simple assignment",
+                        "sections": [
+                            {"id": "background", "title": "Background", "order": 0, "depends_on": []},
+                            {"id": "analysis", "title": "Analysis", "order": 1, "depends_on": []},
+                            {"id": "conclusion", "title": "Conclusion", "order": 2, "depends_on": []},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            ConversationAgentRuntime.complete_task(global_task_id, orchestrator.store)
+
+            second = orchestrator.run(resume=True)
+
+            self.assertEqual(second.status, "paused")
+            state = json.loads((root / ".loop" / "state.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(state["waiting_for_tasks"]), 3)
+            pending_roles = [
+                json.loads(path.read_text(encoding="utf-8"))["role"]
+                for path in (root / ".loop" / "tasks").glob("*.json")
+                if not (root / ".loop" / "agent-results" / path.name).exists()
+            ]
+            self.assertEqual(pending_roles, ["planner", "planner", "planner"])
 
     def test_global_review_reopens_only_affected_sections(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

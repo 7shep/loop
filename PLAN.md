@@ -442,7 +442,7 @@ Suggested configuration:
 
 ```json
 {
-  "max_parallel_sections": 2,
+  "max_parallel_sections": 3,
   "max_parallel_researchers": 3
 }
 ```
@@ -656,7 +656,7 @@ Suggested `loop.config.json`:
     }
   },
   "limits": {
-    "max_parallel_sections": 2,
+    "max_parallel_sections": 3,
     "max_plan_revisions": 2,
     "max_writing_revisions": 3,
     "max_global_revisions": 2
