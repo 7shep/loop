@@ -92,8 +92,10 @@ user to switch threads.
    initializes `.loop/` and emits the next structured task manifest.
 2. List the pending manifests under `.loop/tasks/` with `loop tasks . --json`.
    The scheduler emits a bounded batch of independent section tasks, so more
-   than one manifest may be waiting. Each manifest names the role, model and
-   reasoning effort, artifact inputs (including `.loop/outline-index.json`,
+   than one manifest may be waiting. The default batch limit is three sections
+   (`max_parallel_sections: 3`), and assignment-local configuration can lower
+   or raise that limit. Each manifest names the role, model and reasoning effort,
+   artifact inputs (including `.loop/outline-index.json`,
    `outline/` files, `sources/links.md` when present, and optional source feedback files),
    output path, and role contract.
 3. Spawn native subagents for all currently pending independent manifests in

@@ -921,13 +921,20 @@ Events power:
 
 Concurrency should be dependency-aware and bounded.
 
+The current implementation defaults to three concurrently runnable sections
+(`max_parallel_sections: 3`). Assignment-local configuration can override that
+limit. Each section's internal stages remain sequential, while dependency-linked
+sections wait for prerequisite commits. In the conversation runtime, the active
+batch can queue one task manifest per section; `loop tasks . --json` lists the
+full set of waiting tasks.
+
 Pseudo-code:
 
 ```ts
 while (!graph.complete()) {
   const runnable = graph
     .readyNodes()
-    .slice(0, config.maxParallelSections);
+    .slice(0, config.limits.max_parallel_sections);
 
   await Promise.all(runnable.map(runSection));
 }

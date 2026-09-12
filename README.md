@@ -89,16 +89,17 @@ The deterministic control commands used by the parent workflow are:
 ```bash
 loop run . --runtime conversation --request "Complete the assignment in this folder using the supplied sources."
 loop tasks . --json
-# The parent conversation delegates the pending task to a native subagent.
+# The parent conversation delegates each pending task to a native subagent.
 loop task-complete . --task-id <task-id>
 loop task-bind . --task-id <task-id> --thread-id <native-thread-id>
 loop resume . --runtime conversation
 ```
 
-The parent repeats the handoff until Loop reports `completed`. Each task
-manifest names the role, model/effort mapping, artifact inputs, output path, and
-contract, including any `required_skills`. If native delegation is unavailable,
-the parent may complete the manifest itself as a fallback and must invoke
+The parent delegates every pending task in the current batch, then repeats those
+handoffs until Loop reports `completed`. Each task manifest names the role,
+model/effort mapping, artifact inputs, output path, and contract, including any
+`required_skills`. If native delegation is unavailable, the parent may complete
+each manifest itself as a fallback and must invoke
 `$humanizer` for writer tasks; that preserves correctness but does not show
 separate child-agent activity.
 
