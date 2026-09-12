@@ -90,30 +90,35 @@ user to switch threads.
 1. Capture the request and start the local state machine with
    `loop run . --runtime conversation --request "<request>"`. The command
    initializes `.loop/` and emits the next structured task manifest.
-2. Read the pending manifest under `.loop/tasks/`. It names the role, model and
-   reasoning effort, artifact inputs (including `.loop/outline-index.json`,
+2. List the pending manifests under `.loop/tasks/` with `loop tasks . --json`.
+   The scheduler emits a bounded batch of independent section tasks, so more
+   than one manifest may be waiting. The default batch limit is three sections
+   (`max_parallel_sections: 3`), and assignment-local configuration can lower
+   or raise that limit. Each manifest names the role, model and reasoning effort,
+   artifact inputs (including `.loop/outline-index.json`,
    `outline/` files, `sources/links.md` when present, and optional source feedback files),
    output path, and role contract.
-3. Spawn a native subagent for that task using the matching custom agent from
-   `agents/` (`loop_planner`, `loop_researcher`, `loop_writer`,
-   `loop_reviewer`, or `loop_global_reviewer`) when those definitions have been
-   installed into the host's agent directory. Otherwise spawn the host's
-   default agent and apply the role contract from the manifest directly. Ask
-   the child to read only the listed artifacts, write only the declared output,
-   and return a concise summary. When the manifest's `required_skills` includes
-   `humanizer`, the child must invoke `$humanizer` in embedded mode after
-   drafting and before writing its output.
-   Native Codex/Work delegation makes the child activity visible in the parent
-   conversation and preserves its agent thread for inspection.
-   If the host exposes the child thread ID, bind it with
-   `loop task-bind . --task-id <task-id> --thread-id <thread-id>` so resume
-   state can track the child.
-4. After the child completes, validate its JSON/text artifact, run
-   `loop task-complete . --task-id <task-id>`, then run
-   `loop resume . --runtime conversation` to advance the deterministic runtime.
-5. Repeat the delegation loop until Loop reports `completed`, `failed`, or
-   `cancelled`. Keep the parent conversation's status updates short; the child
-   thread and `.loop/` artifacts hold detailed work.
+3. Spawn native subagents for all currently pending independent manifests in
+   the batch using the matching custom agent from `agents/` (`loop_planner`,
+   `loop_researcher`, `loop_writer`, `loop_reviewer`, or
+   `loop_global_reviewer`) when those definitions have been installed into the
+   host's agent directory. Otherwise spawn the host's default agent and apply
+   each role contract from its manifest directly. Ask every child to read only
+   its listed artifacts, write only its declared output, and return a concise
+   summary. When a manifest's `required_skills` includes `humanizer`, that child
+   must invoke `$humanizer` in embedded mode after drafting and before writing
+   its output. Native Codex/Work delegation makes child activity visible in the
+   parent conversation and preserves each agent thread for inspection.
+   If the host exposes a child thread ID, bind it with
+   `loop task-bind . --task-id <task-id> --thread-id <thread-id>`.
+4. After each child completes, validate its JSON/text artifact and run
+   `loop task-complete . --task-id <task-id>`. Once every task in the current
+   batch is complete, run `loop resume . --runtime conversation` to advance the
+   deterministic runtime and queue the next batch.
+5. Repeat the batch delegation loop until Loop reports `completed`, `failed`, or
+   `cancelled`. Keep the parent conversation's status updates short; child
+   threads and `.loop/` artifacts hold detailed work. Dependency-linked sections
+   are released only after their prerequisite sections commit.
 
 The parent owns transitions, retries, dependency checks, section commits,
 assembly, and global-review routing. Do not skip a gate or manually edit

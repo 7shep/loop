@@ -114,6 +114,10 @@ class RunState:
     config: dict[str, Any] = field(default_factory=dict)
     last_error: str | None = None
     waiting_for_task: str | None = None
+    # A parallel section batch can queue more than one conversation task
+    # before the run pauses. Keep the original field as a compatibility alias
+    # for callers that only understand one waiting task.
+    waiting_for_tasks: list[str] = field(default_factory=list)
     termination_reason: str | None = None
     completed_at: str | None = None
 
@@ -145,6 +149,13 @@ class RunState:
             config=dict(value.get("config", {})),
             last_error=value.get("last_error"),
             waiting_for_task=value.get("waiting_for_task"),
+            waiting_for_tasks=[
+                str(item)
+                for item in value.get(
+                    "waiting_for_tasks",
+                    [value["waiting_for_task"]] if value.get("waiting_for_task") else [],
+                )
+            ],
             termination_reason=value.get("termination_reason"),
             completed_at=value.get("completed_at"),
         )

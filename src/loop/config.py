@@ -30,7 +30,7 @@ class AgentConfig:
 
 @dataclass
 class Limits:
-    max_parallel_sections: int = 2
+    max_parallel_sections: int = 3
     max_parallel_researchers: int = 3
     max_plan_revisions: int = 2
     max_writing_revisions: int = 3

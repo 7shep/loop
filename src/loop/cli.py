@@ -186,7 +186,10 @@ def _status_text(snapshot: dict[str, object]) -> str:
         f"Workspace: {snapshot['workspace_root']}",
         f"Sections: {sections}",
     ]
-    if snapshot.get("waiting_for_task"):
+    waiting_tasks = snapshot.get("waiting_for_tasks", [])
+    if len(waiting_tasks) > 1:
+        lines.append("Waiting for tasks: " + ", ".join(waiting_tasks))
+    elif snapshot.get("waiting_for_task"):
         lines.append(f"Waiting for task: {snapshot['waiting_for_task']}")
     if snapshot.get("last_error"):
         lines.append(f"Error: {snapshot['last_error']}")

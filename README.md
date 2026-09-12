@@ -89,16 +89,17 @@ The deterministic control commands used by the parent workflow are:
 ```bash
 loop run . --runtime conversation --request "Complete the assignment in this folder using the supplied sources."
 loop tasks . --json
-# The parent conversation delegates the pending task to a native subagent.
+# The parent conversation delegates each pending task to a native subagent.
 loop task-complete . --task-id <task-id>
 loop task-bind . --task-id <task-id> --thread-id <native-thread-id>
 loop resume . --runtime conversation
 ```
 
-The parent repeats the handoff until Loop reports `completed`. Each task
-manifest names the role, model/effort mapping, artifact inputs, output path, and
-contract, including any `required_skills`. If native delegation is unavailable,
-the parent may complete the manifest itself as a fallback and must invoke
+The parent delegates every pending task in the current batch, then repeats those
+handoffs until Loop reports `completed`. Each task manifest names the role,
+model/effort mapping, artifact inputs, output path, and contract, including any
+`required_skills`. If native delegation is unavailable, the parent may complete
+each manifest itself as a fallback and must invoke
 `$humanizer` for writer tasks; that preserves correctness but does not show
 separate child-agent activity.
 
@@ -144,6 +145,12 @@ After assembly, the global reviewer returns `PASS` or structured issues with
 affected section IDs. A failed global review reopens only those sections and
 reruns their writing/review path. Retry limits move the run to `failed` instead
 of allowing an unbounded loop.
+
+Independent sections are advanced in bounded parallel batches. The default is
+`max_parallel_sections: 3`; increase it when the assignment and provider can
+support more concurrent agents. Dependencies still form wave boundaries, and
+the stages within one section remain ordered because each stage consumes the
+previous stage's artifact.
 
 ## Folder conventions
 
@@ -202,7 +209,8 @@ available models such as Luna High or Luna xHigh:
     "reviewer": {"model": "gpt-5.6-luna", "effort": "xhigh"}
   },
   "limits": {
-    "max_parallel_sections": 2,
+    "max_parallel_sections": 3,
+    "max_parallel_researchers": 3,
     "max_plan_revisions": 2,
     "max_writing_revisions": 3,
     "max_global_revisions": 2,
@@ -274,15 +282,17 @@ file tools but not native subagent delegation. It queues a least-privilege task
 manifest for the parent session to complete, but cannot create child threads or
 stream their activity itself.
 
-The initial scheduler exposes dependency-aware bounded batches but executes the
-batch serially so shared evidence updates remain deterministic. A provider can
-replace that runtime with bounded parallel workers without changing the state or
-artifact contracts. PDF/DOCX inputs are accepted and passed to native agents by
-reference; provider-specific PDF/DOCX text extraction for the deterministic
-local runtime, richer citation styles, and a live GUI remain follow-on adapters
-rather than hidden assumptions. Native researcher subagents use their web
-search access to inspect the links from `sources/links.md`. The humanizer skill
-does not add a network or source lookup step.
+The scheduler uses dependency-aware bounded worker batches. Section artifacts
+remain isolated, while shared state, task-graph updates, evidence merges, and
+event logging are serialized for safe resumability. The conversation runtime
+can queue multiple independent task manifests; `loop tasks` lists all pending
+tasks when a parallel batch is waiting for native subagents. PDF/DOCX inputs are
+accepted and passed to native agents by reference; provider-specific PDF/DOCX
+text extraction for the deterministic local runtime, richer citation styles,
+and a live GUI remain follow-on adapters rather than hidden assumptions. Native
+researcher subagents use their web search access to inspect the links from
+`sources/links.md`. The humanizer skill does not add a network or source lookup
+step.
 
 ## Verification
 

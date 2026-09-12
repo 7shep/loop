@@ -434,7 +434,10 @@ Argument    Counterargument
   Introduction
 ```
 
-Independent sections may execute concurrently.
+Independent sections may execute concurrently, up to the default limit of three
+sections (`max_parallel_sections: 3`). Each section's internal stages remain
+ordered, and dependency-linked sections are released only after their
+prerequisites commit.
 
 Parallel execution should be bounded to protect subscription usage and machine resources.
 
@@ -442,7 +445,7 @@ Suggested configuration:
 
 ```json
 {
-  "max_parallel_sections": 2,
+  "max_parallel_sections": 3,
   "max_parallel_researchers": 3
 }
 ```
@@ -656,7 +659,7 @@ Suggested `loop.config.json`:
     }
   },
   "limits": {
-    "max_parallel_sections": 2,
+    "max_parallel_sections": 3,
     "max_plan_revisions": 2,
     "max_writing_revisions": 3,
     "max_global_revisions": 2

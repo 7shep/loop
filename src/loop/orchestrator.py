@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
 from dataclasses import dataclass
+from threading import BoundedSemaphore, RLock
 from typing import Any, Callable
 
 from .agents.contracts import AgentResult, AgentRuntime, AgentTask, role_definitions
@@ -68,6 +70,13 @@ class LoopOrchestrator:
         self.request = request.strip() if request and request.strip() else None
         self.state: RunState | None = None
         self.events: EventLog | None = None
+        # Section workers share one in-memory RunState and a handful of
+        # cross-section artifacts. Runtime calls happen outside this lock so
+        # independent agent invocations can actually overlap.
+        self._state_lock = RLock()
+        self._researcher_slots = BoundedSemaphore(
+            self.config.limits.max_parallel_researchers
+        )
 
     def run(self, resume: bool = False) -> RunResult:
         self._load_or_initialize()
@@ -84,7 +93,7 @@ class LoopOrchestrator:
             self._restore_paused_sections()
         self.state.status = RunStatus.RUNNING.value
         self.state.waiting_for_task = None
-        save_state(self.store, self.state)
+        self._save_state()
         if self.events:
             self.events.emit("RUN_RESUMED" if resume else "RUN_STARTED", phase=self.state.current_phase)
 
@@ -101,18 +110,14 @@ class LoopOrchestrator:
                 ]
                 if unfinished:
                     set_run_phase(self.state, RunPhase.SECTION_EXECUTION)
-                    save_state(self.store, self.state)
+                    self._save_state()
                     runnable = self._runnable_sections()
                     if not runnable:
                         self._fail_run("dependency deadlock: no unfinished section is runnable")
                         break
-                    # The batch boundary is explicit and bounded. The first runtime is
-                    # serial for deterministic artifact updates; the graph and batch
-                    # limit are ready for a concurrent provider implementation.
-                    for section in runnable[: self.config.limits.max_parallel_sections]:
-                        self._run_section(section)
-                        if self.state.status != RunStatus.RUNNING.value:
-                            break
+                    self._run_sections_in_parallel(
+                        runnable[: self.config.limits.max_parallel_sections]
+                    )
                     continue
                 if not self._assemble_and_review():
                     break
@@ -129,13 +134,58 @@ class LoopOrchestrator:
         assert self.state is not None
         return RunResult(self.state.status, self.state.run_id, self._status_message())
 
+    def _run_sections_in_parallel(self, sections: list[SectionState]) -> None:
+        """Advance one dependency-safe section batch concurrently.
+
+        A section pipeline is intentionally sequential because each stage
+        consumes the artifact produced by the previous stage. Different
+        runnable sections, however, have isolated artifacts and can share the
+        worker pool. The pool is bounded by ``max_parallel_sections`` at the
+        call site, so subscription and machine usage remain controlled.
+        """
+
+        if len(sections) == 1:
+            self._run_section(sections[0])
+            return
+
+        assert self.events is not None
+        self.events.emit(
+            "SECTION_BATCH_STARTED",
+            section_ids=[section.id for section in sections],
+            worker_count=len(sections),
+        )
+        paused: ConversationPaused | None = None
+        with ThreadPoolExecutor(
+            max_workers=len(sections), thread_name_prefix="loop-section"
+        ) as executor:
+            futures = {
+                executor.submit(self._run_section, section): section for section in sections
+            }
+            for future in as_completed(futures):
+                try:
+                    future.result()
+                except ConversationPaused as exc:
+                    # Let the outer run loop return the same resumable result
+                    # after all already-running workers have safely stopped.
+                    paused = paused or exc
+                except Exception as exc:
+                    section = futures[future]
+                    self._fail_run(f"unexpected section error ({section.id}): {exc}")
+
+        self.events.emit(
+            "SECTION_BATCH_COMPLETED",
+            section_ids=[section.id for section in sections],
+        )
+        if paused:
+            raise paused
+
     def pause(self) -> RunResult:
         self._load_or_initialize(require_existing=True)
         assert self.state is not None
         if self.state.status == RunStatus.RUNNING.value:
             self.state.status = RunStatus.PAUSED.value
             self.state.waiting_for_task = None
-            save_state(self.store, self.state)
+            self._save_state()
             if self.events:
                 self.events.emit("RUN_PAUSED", phase=self.state.current_phase)
         return RunResult(self.state.status, self.state.run_id, "run paused")
@@ -146,7 +196,7 @@ class LoopOrchestrator:
         if self.state.status not in {RunStatus.COMPLETED.value, RunStatus.FAILED.value}:
             self.state.status = RunStatus.CANCELLED.value
             self.state.termination_reason = "cancelled by user"
-            save_state(self.store, self.state)
+            self._save_state()
             if self.events:
                 self.events.emit("RUN_CANCELLED")
         return RunResult(self.state.status, self.state.run_id, "run cancelled")
@@ -165,6 +215,7 @@ class LoopOrchestrator:
             "agent_failures": self.state.agent_failures,
             "agent_threads": self.state.agent_threads,
             "waiting_for_task": self.state.waiting_for_task,
+            "waiting_for_tasks": list(self.state.waiting_for_tasks),
             "last_error": self.state.last_error,
             "termination_reason": self.state.termination_reason,
         }
@@ -173,6 +224,9 @@ class LoopOrchestrator:
         if self.store.exists(".loop/state.json"):
             self.state = load_state(self.store)
             self.config = LoopConfig.from_dict(self.state.config)
+            self._researcher_slots = BoundedSemaphore(
+                self.config.limits.max_parallel_researchers
+            )
             self.events = EventLog(self.store, self.state.run_id, self.reporter)
             # Migrate runs created before outline/ was introduced without
             # changing their existing state or accepted section artifacts.
@@ -203,13 +257,13 @@ class LoopOrchestrator:
             },
         )
         self.store.write_json(".loop/evidence.json", {"evidence": []})
-        save_state(self.store, self.state)
+        self._save_state()
         self.events.emit("RUN_INITIALIZED", workspace_root=str(self.workspace.root))
 
     def _create_global_plan(self) -> None:
         assert self.state is not None and self.events is not None
         set_run_phase(self.state, RunPhase.GLOBAL_PLANNING)
-        save_state(self.store, self.state)
+        self._save_state()
         self.events.emit("GLOBAL_PLAN_STARTED")
         manifest = self.store.read_json(".loop/assignment.json")
         refs = [manifest["assignment_file"]]
@@ -234,7 +288,7 @@ class LoopOrchestrator:
             if self.state.agent_failures > self.config.limits.max_agent_failures:
                 self._fail_run("global planning agent failure limit reached")
             else:
-                save_state(self.store, self.state)
+                self._save_state()
                 self.events.emit("AGENT_RETRY_SCHEDULED", role="orchestrator", attempt=self.state.agent_failures)
             return
         plan = validate_global_plan(value)
@@ -251,7 +305,7 @@ class LoopOrchestrator:
             for section in plan["sections"]
         }
         self._persist_graph()
-        save_state(self.store, self.state)
+        self._save_state()
         self.events.emit("GLOBAL_PLAN_CREATED", section_count=len(self.state.sections))
 
     def _runnable_sections(self) -> list[SectionState]:
@@ -281,8 +335,9 @@ class LoopOrchestrator:
                 if section.status == SectionStatus.PENDING.value:
                     self._transition(section, SectionStatus.PLANNING)
                 elif section.status == SectionStatus.PLANNING.value:
-                    if not section.current_task_id:
-                        section.plan_revision += 1
+                    with self._state_lock:
+                        if not section.current_task_id:
+                            section.plan_revision += 1
                     self._transition(section, SectionStatus.PLANNING)
                     value = self._invoke(
                         self._task(
@@ -315,17 +370,18 @@ class LoopOrchestrator:
                     )
                     review = validate_plan_review(value)
                     self.store.write_json(self._section_ref(section, "plan-review.json"), review)
-                    section.plan_review_attempts += 1
-                    if review["decision"] == "APPROVE":
-                        self._transition(section, SectionStatus.RESEARCHING)
-                    elif section.plan_revision > self.config.limits.max_plan_revisions:
-                        self._fail_section(section, "plan revision limit reached")
-                        return
-                    else:
-                        section.last_feedback = review.get("issues", [])
-                        self._reset_graph_from(section.id, "plan")
-                        self._transition(section, SectionStatus.PLANNING)
-                        self.events.emit("PLAN_REJECTED", section_id=section.id)
+                    with self._state_lock:
+                        section.plan_review_attempts += 1
+                        if review["decision"] == "APPROVE":
+                            self._transition(section, SectionStatus.RESEARCHING)
+                        elif section.plan_revision > self.config.limits.max_plan_revisions:
+                            self._fail_section(section, "plan revision limit reached")
+                            return
+                        else:
+                            section.last_feedback = review.get("issues", [])
+                            self._reset_graph_from(section.id, "plan")
+                            self._transition(section, SectionStatus.PLANNING)
+                            self.events.emit("PLAN_REJECTED", section_id=section.id)
                 elif section.status == SectionStatus.RESEARCHING.value:
                     value = self._invoke(
                         self._task(
@@ -346,8 +402,9 @@ class LoopOrchestrator:
                     self._merge_evidence(research)
                     self._transition(section, SectionStatus.WRITING)
                 elif section.status == SectionStatus.WRITING.value:
-                    if not section.current_task_id:
-                        section.writing_revision += 1
+                    with self._state_lock:
+                        if not section.current_task_id:
+                            section.writing_revision += 1
                     value = self._invoke(
                         self._task(
                             role="writer",
@@ -394,17 +451,18 @@ class LoopOrchestrator:
                     )
                     review = validate_writing_review(value)
                     self.store.write_json(self._section_ref(section, "writing-review.json"), review)
-                    section.writing_review_attempts += 1
-                    if review["decision"] == "APPROVE":
-                        self._transition(section, SectionStatus.APPROVED)
-                    elif section.writing_revision > self.config.limits.max_writing_revisions:
-                        self._fail_section(section, "writing revision limit reached")
-                        return
-                    else:
-                        section.last_feedback = review.get("critical_issues", [])
-                        self._reset_graph_from(section.id, "write")
-                        self._transition(section, SectionStatus.WRITING)
-                        self.events.emit("DRAFT_REJECTED", section_id=section.id)
+                    with self._state_lock:
+                        section.writing_review_attempts += 1
+                        if review["decision"] == "APPROVE":
+                            self._transition(section, SectionStatus.APPROVED)
+                        elif section.writing_revision > self.config.limits.max_writing_revisions:
+                            self._fail_section(section, "writing revision limit reached")
+                            return
+                        else:
+                            section.last_feedback = review.get("critical_issues", [])
+                            self._reset_graph_from(section.id, "write")
+                            self._transition(section, SectionStatus.WRITING)
+                            self.events.emit("DRAFT_REJECTED", section_id=section.id)
                 elif section.status == SectionStatus.APPROVED.value:
                     self._commit_section(section)
                     return
@@ -414,24 +472,25 @@ class LoopOrchestrator:
                     return
                 else:
                     raise OrchestrationError(f"unsupported section state: {section.status}")
-                save_state(self.store, self.state)
+                self._save_state()
         except ConversationPaused:
             raise
         except AgentExecutionError as exc:
-            section.agent_failures += 1
-            section.last_error = str(exc)
-            if section.agent_failures > self.config.limits.max_agent_failures:
-                self._fail_section(section, f"agent failure limit reached: {section.last_error}")
-            else:
-                save_state(self.store, self.state)
-                self.events.emit("AGENT_RETRY_SCHEDULED", section_id=section.id, attempt=section.agent_failures)
+            with self._state_lock:
+                section.agent_failures += 1
+                section.last_error = str(exc)
+                if section.agent_failures > self.config.limits.max_agent_failures:
+                    self._fail_section(section, f"agent failure limit reached: {section.last_error}")
+                else:
+                    self._save_state()
+                    self.events.emit("AGENT_RETRY_SCHEDULED", section_id=section.id, attempt=section.agent_failures)
         except (SchemaError, OrchestrationError) as exc:
             self._fail_section(section, str(exc))
 
     def _assemble_and_review(self) -> bool:
         assert self.state is not None and self.events is not None
         set_run_phase(self.state, RunPhase.ASSEMBLY)
-        save_state(self.store, self.state)
+        self._save_state()
         sections = list(self.state.sections.values())
         sources = self.store.read_json(".loop/source-index.json")["sources"]
         if self.config.output == "latex":
@@ -442,7 +501,7 @@ class LoopOrchestrator:
             draft_ref = "output/final-draft.md"
         self.events.emit("DOCUMENT_ASSEMBLED", word_count=count)
         set_run_phase(self.state, RunPhase.GLOBAL_REVIEW)
-        save_state(self.store, self.state)
+        self._save_state()
         self.events.emit("GLOBAL_REVIEW_STARTED", cycle=self.state.global_review_cycle)
         try:
             value = self._invoke(
@@ -464,7 +523,7 @@ class LoopOrchestrator:
             if self.state.agent_failures > self.config.limits.max_agent_failures:
                 self._fail_run("global review agent failure limit reached")
                 return False
-            save_state(self.store, self.state)
+            self._save_state()
             self.events.emit("AGENT_RETRY_SCHEDULED", role="global_reviewer", attempt=self.state.agent_failures)
             return True
         review = validate_global_review(value)
@@ -476,7 +535,7 @@ class LoopOrchestrator:
             self.state.current_phase = RunPhase.COMPLETE.value
             self.state.completed_at = utc_now()
             self.state.termination_reason = "global review passed"
-            save_state(self.store, self.state)
+            self._save_state()
             self.events.emit("RUN_COMPLETED", output=final_ref, word_count=count)
             return True
         self.state.global_review_cycle += 1
@@ -499,7 +558,7 @@ class LoopOrchestrator:
             section.last_feedback = issues
             self._reset_graph_from(section.id, "write")
             self.events.emit("SECTION_REOPENED", section_id=section_id, reason="global_review")
-        save_state(self.store, self.state)
+        self._save_state()
         self.events.emit("GLOBAL_REVIEW_FAILED", cycle=self.state.global_review_cycle, affected=list(affected))
         return True
 
@@ -563,88 +622,120 @@ class LoopOrchestrator:
 
     def _invoke(self, task: AgentTask, section: SectionState | None = None) -> Any:
         assert self.state is not None and self.events is not None
-        previous_status = section.status if section else None
-        self.state.waiting_for_task = None
-        if section:
-            section.current_task_id = task.task_id
-        save_state(self.store, self.state)
-        self.events.emit("AGENT_TASK_STARTED", role=task.role, task_id=task.task_id, section_id=task.metadata.get("section", {}).get("id"))
-        result: AgentResult = self.runtime.run(task, self.store)
-        if result.status == "waiting":
+        with self._state_lock:
+            previous_status = section.status if section else None
+            if task.task_id in self.state.waiting_for_tasks:
+                self.state.waiting_for_tasks.remove(task.task_id)
+                self._refresh_waiting_task()
             if section:
-                section.paused_from = previous_status
-                section.status = SectionStatus.PAUSED.value
-            self.state.status = RunStatus.PAUSED.value
-            self.state.waiting_for_task = task.task_id
-            save_state(self.store, self.state)
-            self.events.emit("AGENT_TASK_WAITING", role=task.role, task_id=task.task_id)
-            raise ConversationPaused(result.error or "agent task is waiting")
-        if result.status != "completed":
-            self.events.emit("AGENT_TASK_FAILED", role=task.role, task_id=task.task_id, error=result.error)
-            raise AgentExecutionError(result.error or "agent task failed")
-        if task.output_kind == "json":
-            if result.output is not None and not self.store.exists(task.output_ref):
-                self.store.write_json(task.output_ref, result.output)
-        elif task.output_kind == "text":
-            if isinstance(result.output, str) and not self.store.exists(task.output_ref):
-                self.store.write_text(task.output_ref, result.output)
-        self.events.emit("AGENT_TASK_COMPLETED", role=task.role, task_id=task.task_id, section_id=task.metadata.get("section", {}).get("id"))
-        if task.task_id in self.state.agent_threads:
-            self.state.agent_threads[task.task_id]["status"] = "completed"
-        if section:
-            section.current_task_id = None
-        save_state(self.store, self.state)
-        return result.output if result.output is not None else (
-            self.store.read_json(task.output_ref) if task.output_kind == "json" else self.store.read_text(task.output_ref)
-        )
+                section.current_task_id = task.task_id
+            self._save_state()
+            self.events.emit("AGENT_TASK_STARTED", role=task.role, task_id=task.task_id, section_id=task.metadata.get("section", {}).get("id"))
+        researcher_slot = self._researcher_slots if task.role == "researcher" else None
+        if researcher_slot:
+            researcher_slot.acquire()
+        try:
+            result: AgentResult = self.runtime.run(task, self.store)
+        finally:
+            if researcher_slot:
+                researcher_slot.release()
+        with self._state_lock:
+            if result.status == "waiting":
+                if section:
+                    section.paused_from = previous_status
+                    section.status = SectionStatus.PAUSED.value
+                self.state.status = RunStatus.PAUSED.value
+                if task.task_id not in self.state.waiting_for_tasks:
+                    self.state.waiting_for_tasks.append(task.task_id)
+                self._refresh_waiting_task()
+                self._save_state()
+                self.events.emit("AGENT_TASK_WAITING", role=task.role, task_id=task.task_id)
+                raise ConversationPaused(result.error or "agent task is waiting")
+            if result.status != "completed":
+                self.events.emit("AGENT_TASK_FAILED", role=task.role, task_id=task.task_id, error=result.error)
+                raise AgentExecutionError(result.error or "agent task failed")
+            if task.output_kind == "json":
+                if result.output is not None and not self.store.exists(task.output_ref):
+                    self.store.write_json(task.output_ref, result.output)
+            elif task.output_kind == "text":
+                if isinstance(result.output, str) and not self.store.exists(task.output_ref):
+                    self.store.write_text(task.output_ref, result.output)
+            self.events.emit("AGENT_TASK_COMPLETED", role=task.role, task_id=task.task_id, section_id=task.metadata.get("section", {}).get("id"))
+            if task.task_id in self.state.agent_threads:
+                self.state.agent_threads[task.task_id]["status"] = "completed"
+            if section:
+                section.current_task_id = None
+            self._save_state()
+            return result.output if result.output is not None else (
+                self.store.read_json(task.output_ref) if task.output_kind == "json" else self.store.read_text(task.output_ref)
+            )
 
     def _merge_evidence(self, research: dict[str, Any]) -> None:
-        source_ids = {source["id"] for source in self.store.read_json(".loop/source-index.json")["sources"]}
-        registry = self.store.read_json(".loop/evidence.json")
-        existing = {item["id"] for item in registry.get("evidence", [])}
-        for record in research.get("evidence", []):
-            if record["source_id"] not in source_ids:
-                raise SchemaError(f"evidence references unregistered source: {record['source_id']}")
-            if record["id"] not in existing:
-                registry.setdefault("evidence", []).append(record)
-                existing.add(record["id"])
-        self.store.write_json(".loop/evidence.json", registry)
+        with self._state_lock:
+            source_ids = {source["id"] for source in self.store.read_json(".loop/source-index.json")["sources"]}
+            registry = self.store.read_json(".loop/evidence.json")
+            existing = {item["id"] for item in registry.get("evidence", [])}
+            for record in research.get("evidence", []):
+                if record["source_id"] not in source_ids:
+                    raise SchemaError(f"evidence references unregistered source: {record['source_id']}")
+                if record["id"] not in existing:
+                    registry.setdefault("evidence", []).append(record)
+                    existing.add(record["id"])
+            self.store.write_json(".loop/evidence.json", registry)
 
     def _commit_section(self, section: SectionState) -> None:
         assert self.state is not None and self.events is not None
-        draft_ref = self._section_ref(section, "draft.md")
-        committed_ref = self._section_ref(section, "committed.md")
-        self.store.write_text(committed_ref, self.store.read_text(draft_ref))
-        section.committed_artifact = committed_ref
-        section.affected_by_global_review = False
-        self._transition(section, SectionStatus.COMMITTED)
-        self.events.emit("SECTION_COMMITTED", section_id=section.id, artifact=committed_ref)
+        with self._state_lock:
+            draft_ref = self._section_ref(section, "draft.md")
+            committed_ref = self._section_ref(section, "committed.md")
+            self.store.write_text(committed_ref, self.store.read_text(draft_ref))
+            section.committed_artifact = committed_ref
+            section.affected_by_global_review = False
+            self._transition(section, SectionStatus.COMMITTED)
+            self.events.emit("SECTION_COMMITTED", section_id=section.id, artifact=committed_ref)
 
     def _transition(self, section: SectionState, status: SectionStatus) -> None:
         assert self.state is not None and self.events is not None
-        section.status = status.value
-        self._graph_stage(section.id, status.value)
-        save_state(self.store, self.state)
-        self.events.emit("SECTION_STATE_CHANGED", section_id=section.id, status=status.value)
+        with self._state_lock:
+            section.status = status.value
+            self._graph_stage(section.id, status.value)
+            self._save_state()
+            self.events.emit("SECTION_STATE_CHANGED", section_id=section.id, status=status.value)
 
     def _fail_section(self, section: SectionState, reason: str) -> None:
         assert self.state is not None and self.events is not None
-        section.status = SectionStatus.FAILED.value
-        section.last_error = reason
-        self.state.status = RunStatus.FAILED.value
-        self.state.last_error = f"section {section.id}: {reason}"
-        self.state.termination_reason = "section failure"
-        save_state(self.store, self.state)
-        self.events.emit("SECTION_FAILED", section_id=section.id, error=reason)
+        with self._state_lock:
+            section.status = SectionStatus.FAILED.value
+            section.last_error = reason
+            self.state.status = RunStatus.FAILED.value
+            self.state.last_error = f"section {section.id}: {reason}"
+            self.state.termination_reason = "section failure"
+            self._save_state()
+            self.events.emit("SECTION_FAILED", section_id=section.id, error=reason)
 
     def _fail_run(self, reason: str) -> None:
         assert self.state is not None
-        self.state.status = RunStatus.FAILED.value
-        self.state.last_error = reason
-        self.state.termination_reason = reason
-        save_state(self.store, self.state)
-        if self.events:
-            self.events.emit("RUN_FAILED", error=reason)
+        with self._state_lock:
+            self.state.status = RunStatus.FAILED.value
+            self.state.last_error = reason
+            self.state.termination_reason = reason
+            self._save_state()
+            if self.events:
+                self.events.emit("RUN_FAILED", error=reason)
+
+    def _save_state(self) -> None:
+        assert self.state is not None
+        with self._state_lock:
+            save_state(self.store, self.state)
+
+    def _refresh_waiting_task(self) -> None:
+        """Keep the legacy singular task field aligned with all queued tasks."""
+
+        assert self.state is not None
+        self.state.waiting_for_tasks = sorted(set(self.state.waiting_for_tasks))
+        self.state.waiting_for_task = (
+            self.state.waiting_for_tasks[0] if self.state.waiting_for_tasks else None
+        )
 
     def _section_ref(self, section: SectionState, name: str) -> str:
         safe_id = re.sub(r"[^a-zA-Z0-9_-]", "-", section.id)
@@ -822,19 +913,21 @@ class LoopOrchestrator:
 
     def _reset_graph_from(self, section_id: str, stage: str) -> None:
         assert self.state is not None
-        graph = TaskGraph.from_dict(self.state.graph)
-        stages = ["plan", "plan_review", "research", "write", "writing_review", "commit"]
-        for candidate in stages[stages.index(stage) :]:
-            graph.set_status(f"{section_id}:{candidate}", "pending")
-        self.state.graph = graph.to_dict()
-        self._persist_graph()
+        with self._state_lock:
+            graph = TaskGraph.from_dict(self.state.graph)
+            stages = ["plan", "plan_review", "research", "write", "writing_review", "commit"]
+            for candidate in stages[stages.index(stage) :]:
+                graph.set_status(f"{section_id}:{candidate}", "pending")
+            self.state.graph = graph.to_dict()
+            self._persist_graph()
 
     def _set_graph_status(self, node_id: str, status: str) -> None:
         assert self.state is not None
-        graph = TaskGraph.from_dict(self.state.graph)
-        graph.set_status(node_id, status)
-        self.state.graph = graph.to_dict()
-        self._persist_graph()
+        with self._state_lock:
+            graph = TaskGraph.from_dict(self.state.graph)
+            graph.set_status(node_id, status)
+            self.state.graph = graph.to_dict()
+            self._persist_graph()
 
     def _persist_graph(self) -> None:
         assert self.state is not None
@@ -842,14 +935,17 @@ class LoopOrchestrator:
 
     def _restore_paused_sections(self) -> None:
         assert self.state is not None
-        for section in self.state.sections.values():
-            if section.status == SectionStatus.PAUSED.value:
-                section.status = section.paused_from or SectionStatus.PENDING.value
-                section.paused_from = None
-        save_state(self.store, self.state)
+        with self._state_lock:
+            for section in self.state.sections.values():
+                if section.status == SectionStatus.PAUSED.value:
+                    section.status = section.paused_from or SectionStatus.PENDING.value
+                    section.paused_from = None
+            self._save_state()
 
     def _waiting_message(self) -> str:
         assert self.state is not None
+        if len(self.state.waiting_for_tasks) > 1:
+            return "waiting for Codex tasks " + ", ".join(self.state.waiting_for_tasks)
         if self.state.waiting_for_task:
             return f"waiting for Codex task {self.state.waiting_for_task}"
         return "run paused"
