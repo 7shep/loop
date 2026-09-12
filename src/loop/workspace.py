@@ -45,7 +45,7 @@ Describe the task to complete.
     "README.md": """# This Loop workspace
 
 This folder is an assignment workspace for Loop. Keep the assignment prompt,
-guidance, and source links here so the workflow can use one self-contained
+guidance, and optional source links here so the workflow can use one self-contained
 workspace.
 
 ## Set up the assignment
@@ -53,8 +53,8 @@ workspace.
 1. Replace the template in `assignment.md` with the full assignment prompt,
    requirements, constraints, and deliverable details.
 2. Put the assignment brief, outline, rubric, and class guidance in `outline/`.
-3. Add the HTTP(S) sources Loop may cite to `sources/links.md` as Markdown links
-   or plain URLs, one per line.
+3. If the assignment uses outside sources, add the HTTP(S) links Loop may cite
+   to `sources/links.md` as Markdown links or plain URLs, one per line.
 4. Put optional past grades or professor feedback in `sources/` as PDF, DOCX,
    Markdown, or text files. These are guidance only and are not cited as
    sources.
@@ -64,7 +64,7 @@ workspace.
 From this folder, ask Loop to complete the assignment:
 
 ```bash
-loop run . --runtime conversation --request "Complete the assignment in this folder using the supplied sources."
+loop run . --runtime conversation --request "Complete the assignment in this folder using the supplied assignment materials."
 ```
 
 The conversation runtime pauses when it needs a native Codex/ChatGPT Work
@@ -119,8 +119,8 @@ class InitResult:
 
 @dataclass(frozen=True)
 class Workspace:
-    # Markdown is included because it is a plain-text feedback format; the
-    # required links.md is excluded by path and remains the only source list.
+    # Markdown is included because it is a plain-text feedback format; links.md
+    # is excluded by path and remains the only source list when present.
     SOURCE_FEEDBACK_EXTENSIONS = frozenset({".docx", ".md", ".pdf", ".text", ".txt"})
     _MARKDOWN_LINK_RE = re.compile(r"\[[^\]]*\]\((https?://[^\s)]+)\)", re.IGNORECASE)
     _URL_RE = re.compile(r"https?://[^\s<>\[\]()]+", re.IGNORECASE)
@@ -334,13 +334,12 @@ class Workspace:
 
         source_root = self.inside("sources")
         links_path = self.inside("sources/links.md")
-        if not links_path.is_file():
-            raise WorkspaceError("sources/links.md is required in the active assignment directory")
-
-        source_artifacts = sorted(
-            (path for path in source_root.rglob("*") if path.is_file()),
-            key=lambda item: self.relative(item),
-        )
+        source_artifacts = []
+        if source_root.is_dir():
+            source_artifacts = sorted(
+                (path for path in source_root.rglob("*") if path.is_file()),
+                key=lambda item: self.relative(item),
+            )
         unsupported = [
             self.relative(path)
             for path in source_artifacts
@@ -359,7 +358,8 @@ class Workspace:
             for path in source_artifacts
             if path.resolve() != links_path.resolve()
         ]
-        source_files = [self.relative(links_path)]
+        links_file = self.relative(links_path) if links_path.is_file() else None
+        source_files = [links_file] if links_file else []
         source_artifact_refs = [self.relative(path) for path in source_artifacts]
 
         return {
@@ -374,9 +374,9 @@ class Workspace:
             "assignment_outline_files": assignment_outline_files,
             "rubric_files": rubric_files,
             # Historical grades/feedback belong in sources/ alongside the
-            # canonical links file. Keep outline history visible for older
-            # assignment layouts, but expose the source-folder files
-            # separately so they cannot be mistaken for citation sources.
+            # optional links file. Keep outline history visible for older
+            # assignment layouts, but expose the source-folder files separately
+            # so they cannot be mistaken for citation sources.
             "past_marks_files": [
                 *outline_index["past_marks_files"],
                 *source_feedback_files,
@@ -385,18 +385,18 @@ class Workspace:
             "legacy_outline_files": outline_index["legacy_files"],
             "source_files": source_files,
             "source_dir": "sources",
-            "links_file": self.relative(links_path),
+            "links_file": links_file,
             "source_feedback_files": source_feedback_files,
             "source_artifacts": source_artifact_refs,
         }
 
     def source_index(self) -> list[dict[str, Any]]:
         manifest = self.input_manifest()
-        links_file = manifest["links_file"]
+        links_file = manifest.get("links_file")
+        if not links_file:
+            return []
         links_text = self.read_input(links_file)
         links = self._extract_urls(links_text)
-        if not links:
-            raise WorkspaceError("sources/links.md must contain at least one HTTP(S) source link")
 
         result: list[dict[str, Any]] = []
         for index, link in enumerate(links, start=1):

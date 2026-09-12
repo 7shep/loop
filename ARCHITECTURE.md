@@ -175,7 +175,7 @@ Loop indexes every file in that directory in `.loop/outline-index.json` and
 passes the references to the relevant roles. Historical feedback is converted
 by reasoning agents into supported do/not-do checks, while the current outline
 and rubric remain authoritative. Root-level `outline.md` and `rubric.*` remain
-supported as a compatibility path. `sources/links.md` is required. Its HTTP(S)
+supported as a compatibility path. `sources/links.md` is optional. When present, its HTTP(S)
 links become the only registered citation sources, while optional PDF, DOCX, and
 text files in `sources/` are passed as historical grade-feedback guidance and
 are never citable.
@@ -699,7 +699,8 @@ All sources should have canonical internal IDs.
 ```
 
 The source registry is the authoritative list of allowed citations. It is
-derived from the HTTP(S) links in the required `sources/links.md`; optional
+derived from the HTTP(S) links in `sources/links.md` when that file is present;
+an empty or missing links file produces an empty source registry. Optional
 grade-feedback files are not registered sources.
 
 ---
@@ -1014,7 +1015,7 @@ no final document writes
 ### Researcher
 
 ```text
-read sources/links.md and optional grade-feedback files
+read sources/links.md when present and optional grade-feedback files
 use web search to inspect relevant links when enabled
 write research/evidence artifacts
 ```

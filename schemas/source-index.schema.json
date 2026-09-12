@@ -4,7 +4,7 @@
   "type": "object",
   "required": ["links_file", "feedback_files", "sources"],
   "properties": {
-    "links_file": {"const": "sources/links.md"},
+    "links_file": {"enum": ["sources/links.md", null]},
     "feedback_files": {"type": "array", "items": {"type": "string"}},
     "sources": {
       "type": "array",

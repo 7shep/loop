@@ -28,13 +28,14 @@ loop init CISC335
 This creates the `CISC335/` child directory and its canonical assignment,
 outline, source, runtime, and output layout. Fill in `CISC335/assignment.md`,
 add guidance under `CISC335/outline/`, and add citation links to
-`CISC335/sources/links.md` before starting the workflow. Running the command
+`CISC335/sources/links.md` when the assignment uses outside sources. Running the command
 again for the same assignment preserves existing files and only restores
 missing starter files or folders.
 
 ## Assignment guidance inputs
 
-`assignment.md` and `sources/links.md` are required. Assignment guidance belongs
+`assignment.md` is required. `sources/links.md` is optional and only needed when
+the assignment uses outside sources. Assignment guidance belongs
 in an optional `outline/` directory; it is a collection, not a single required
 filename. Every file below that directory is indexed and passed to the relevant
 agents, including PDFs, Markdown, text, and nested files. The sources directory
@@ -42,7 +43,7 @@ has a fixed entry point and an optional historical-feedback collection:
 
 ```text
 sources/
-├── links.md                   # required HTTP(S) source links
+├── links.md                   # optional HTTP(S) source links
 ├── past-grade.pdf             # optional
 ├── professor-feedback.docx    # optional
 └── previous-comments.txt      # optional
@@ -50,7 +51,9 @@ sources/
 
 Optional source feedback files must be PDF, DOCX, or text files. They are
 historical guidance and are never citation sources. Each HTTP(S) link in
-`sources/links.md` becomes a registered web source (`S01`, `S02`, ...):
+`sources/links.md`, when present, becomes a registered web source (`S01`, `S02`, ...).
+An empty or missing links file produces no registered sources and is valid for
+assignments that do not use outside sources:
 
 ```text
 outline/
@@ -89,7 +92,7 @@ user to switch threads.
    initializes `.loop/` and emits the next structured task manifest.
 2. Read the pending manifest under `.loop/tasks/`. It names the role, model and
    reasoning effort, artifact inputs (including `.loop/outline-index.json`,
-   `outline/` files, `sources/links.md`, and optional source feedback files),
+   `outline/` files, `sources/links.md` when present, and optional source feedback files),
    output path, and role contract.
 3. Spawn a native subagent for that task using the matching custom agent from
    `agents/` (`loop_planner`, `loop_researcher`, `loop_writer`,

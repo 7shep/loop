@@ -55,7 +55,7 @@ class PauseOnWriterRuntime(DemoAgentRuntime):
         return super().run(task, store)
 
 
-def add_required_sources(root: Path, links: str = "[Example source](https://example.com/source)\n") -> Path:
+def add_sources(root: Path, links: str = "[Example source](https://example.com/source)\n") -> Path:
     sources = root / "sources"
     sources.mkdir()
     (sources / "links.md").write_text(links, encoding="utf-8")
@@ -177,7 +177,7 @@ class LoopFoundationTests(unittest.TestCase):
             (outline / "prior-feedback.pdf").write_bytes(b"%PDF-1.4\n")
             (outline / "rubric-feedback.pdf").write_bytes(b"%PDF-1.4\n")
             (outline / "class-notes.txt").write_text("Additional guidance.", encoding="utf-8")
-            add_required_sources(root)
+            add_sources(root)
 
             manifest = Workspace.discover(root).input_manifest()
 
@@ -208,7 +208,7 @@ class LoopFoundationTests(unittest.TestCase):
             (root / "assignment.md").write_text("Complete the assignment.", encoding="utf-8")
             (root / "outline.md").write_text("# Introduction", encoding="utf-8")
             (root / "rubric.pdf").write_bytes(b"%PDF-1.4\n")
-            add_required_sources(root)
+            add_sources(root)
 
             manifest = Workspace.discover(root).input_manifest()
 
@@ -227,7 +227,7 @@ class LoopFoundationTests(unittest.TestCase):
             (outline / "lost-marks.md").write_text(
                 "Past feedback: insufficient evidence.", encoding="utf-8"
             )
-            sources = add_required_sources(root)
+            sources = add_sources(root)
             (sources / "past-grade.pdf").write_bytes(b"%PDF-1.4\n")
 
             orchestrator = LoopOrchestrator(
@@ -259,7 +259,7 @@ class LoopFoundationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "assignment.md").write_text("Complete the assignment.", encoding="utf-8")
-            add_required_sources(root)
+            add_sources(root)
             runtime = PauseOnWriterRuntime()
             orchestrator = LoopOrchestrator(
                 Workspace.discover(root), config=LoopConfig(runtime="demo"), runtime=runtime
@@ -277,11 +277,11 @@ class LoopFoundationTests(unittest.TestCase):
             self.assertIn("invoke `$humanizer`", task.instructions)
             self.assertIn("citation marker", task.instructions)
 
-    def test_sources_require_links_and_index_only_external_links(self) -> None:
+    def test_source_links_are_indexed_and_feedback_is_not(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "assignment.md").write_text("Complete the assignment.", encoding="utf-8")
-            sources = add_required_sources(
+            sources = add_sources(
                 root,
                 "# Sources\n\n[First source](https://example.com/first)\n"
                 "Second source: https://example.org/second.\n"
@@ -312,16 +312,29 @@ class LoopFoundationTests(unittest.TestCase):
             self.assertEqual(registry[1]["url"], "https://example.org/second")
             self.assertTrue(all(item["path"] == "sources/links.md" for item in registry))
 
-    def test_sources_links_md_is_required_and_other_types_are_rejected(self) -> None:
+    def test_source_links_are_optional_and_empty_index_is_valid(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "assignment.md").write_text("Complete the assignment.", encoding="utf-8")
+
+            workspace = Workspace.discover(root)
+            manifest = workspace.input_manifest()
+            self.assertIsNone(manifest["links_file"])
+            self.assertEqual(manifest["source_files"], [])
+            self.assertEqual(workspace.source_index(), [])
+
             (root / "sources").mkdir()
+            (root / "sources" / "links.md").write_text("# Sources\n", encoding="utf-8")
+            manifest = workspace.input_manifest()
+            self.assertEqual(manifest["links_file"], "sources/links.md")
+            self.assertEqual(manifest["source_files"], ["sources/links.md"])
+            self.assertEqual(workspace.source_index(), [])
 
-            with self.assertRaisesRegex(WorkspaceError, "sources/links.md is required"):
-                Workspace.discover(root).input_manifest()
-
-            (root / "sources" / "links.md").write_text("https://example.com", encoding="utf-8")
+    def test_unsupported_source_types_are_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "assignment.md").write_text("Complete the assignment.", encoding="utf-8")
+            sources = add_sources(root)
             (root / "sources" / "notes.png").write_bytes(b"not an allowed feedback format")
             with self.assertRaisesRegex(WorkspaceError, "unsupported file"):
                 Workspace.discover(root).input_manifest()
@@ -336,7 +349,7 @@ class LoopFoundationTests(unittest.TestCase):
             (root / "outline" / "assignment-outline.md").write_text(
                 "# Background\n# Analysis\n# Conclusion\n", encoding="utf-8"
             )
-            add_required_sources(root)
+            add_sources(root)
             config = LoopConfig(runtime="demo")
             orchestrator = LoopOrchestrator(
                 Workspace.discover(root),
@@ -358,11 +371,40 @@ class LoopFoundationTests(unittest.TestCase):
             self.assertIn("References", (root / "output" / "final.md").read_text(encoding="utf-8"))
             self.assertTrue((root / ".loop" / "request.md").exists())
 
+    def test_demo_runtime_completes_without_external_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "assignment.md").write_text(
+                "Solve the supplied homework problem set and submit the solutions as a PDF.",
+                encoding="utf-8",
+            )
+            (root / "outline").mkdir()
+            (root / "outline" / "assignment-outline.md").write_text(
+                "# Problem Set\n# Solutions\n", encoding="utf-8"
+            )
+            sources = root / "sources"
+            sources.mkdir()
+            (sources / "links.md").write_text("# No external sources\n", encoding="utf-8")
+
+            orchestrator = LoopOrchestrator(
+                Workspace.discover(root),
+                config=LoopConfig(runtime="demo"),
+                runtime=DemoAgentRuntime(),
+            )
+            result = orchestrator.run()
+
+            self.assertEqual(result.status, "completed", result.message)
+            source_index = json.loads((root / ".loop" / "source-index.json").read_text(encoding="utf-8"))
+            self.assertEqual(source_index["links_file"], "sources/links.md")
+            self.assertEqual(source_index["sources"], [])
+            output = (root / "output" / "final.md").read_text(encoding="utf-8")
+            self.assertNotIn("References", output)
+
     def test_conversation_runtime_persists_a_resumable_task_handoff(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             (root / "assignment.md").write_text("Complete the assignment.", encoding="utf-8")
-            add_required_sources(root)
+            add_sources(root)
             workspace = Workspace.discover(root)
             orchestrator = LoopOrchestrator(
                 workspace, config=LoopConfig(runtime="conversation"), runtime=ConversationAgentRuntime()
@@ -404,7 +446,7 @@ class LoopFoundationTests(unittest.TestCase):
             (root / "outline" / "assignment-outline.md").write_text(
                 "# Background\n# Analysis\n", encoding="utf-8"
             )
-            add_required_sources(root)
+            add_sources(root)
             runtime = ReopenOnceRuntime()
             orchestrator = LoopOrchestrator(
                 Workspace.discover(root), config=LoopConfig(runtime="demo"), runtime=runtime
